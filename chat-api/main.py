@@ -51,6 +51,7 @@ class Source(BaseModel):
     score: float
     start_time: Optional[int] = None
     timestamp_url: Optional[str] = None
+    published_at: Optional[str] = None
 
 
 class ChatResponse(BaseModel):
@@ -279,10 +280,15 @@ async def chat(req: ChatRequest):
             score=round(r["score"], 4),
             start_time=start_time,
             timestamp_url=timestamp_url,
+            published_at=p.get("published_at"),
         ))
         context_parts.append(f"[{p.get('title', 'Unknown')}]\n{p.get('text', '')}")
 
     context = "\n\n---\n\n".join(context_parts)
+
+    # Sort sources by recency so the most recent episode appears first.
+    # Sources without published_at (legacy vectors) fall to the end.
+    sources.sort(key=lambda s: s.published_at or "", reverse=True)
 
     try:
         answer = await _call_openrouter(req.question, context, model)
