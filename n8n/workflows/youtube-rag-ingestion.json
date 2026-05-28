@@ -1,0 +1,149 @@
+{
+  "name": "YouTube RAG Ingestion",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "b1a2c3d4-0001-4000-a000-000000000001",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [220, 300]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "id": "cfg-01", "name": "playlist_id",      "value": "REPLACE_WITH_YOUR_PLAYLIST_ID",      "type": "string" },
+            { "id": "cfg-02", "name": "youtube_api_key",  "value": "REPLACE_WITH_YOUR_YOUTUBE_API_KEY",  "type": "string" },
+            { "id": "cfg-03", "name": "collection",       "value": "podcasts",                           "type": "string" },
+            { "id": "cfg-04", "name": "chunk_size",        "value": 1200,                                 "type": "number" },
+            { "id": "cfg-05", "name": "embedding_model",  "value": "nvidia/llama-nemotron-embed-vl-1b-v2:free", "type": "string" },
+            { "id": "cfg-06", "name": "qdrant_url",       "value": "http://qdrant:6333",                      "type": "string" },
+            { "id": "cfg-07", "name": "scraper_url",      "value": "http://scraper-service:8001",             "type": "string" },
+            { "id": "cfg-08", "name": "embedding_url",    "value": "https://openrouter.ai/api",               "type": "string" },
+            { "id": "cfg-09", "name": "langs",            "value": "bg-orig,bg,en,en-GB",               "type": "string" },
+            { "id": "cfg-10", "name": "openrouter_api_key", "value": "REPLACE_WITH_YOUR_OPENROUTER_API_KEY", "type": "string" },
+            { "id": "cfg-11", "name": "embed_batch_size", "value": 50,                                   "type": "number" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b1a2c3d4-0002-4000-a000-000000000002",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ $('Config').first().json.qdrant_url + '/collections/' + $('Config').first().json.collection }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"vectors\":{\"size\":2048,\"distance\":\"Cosine\"}}",
+        "options": { "ignore400": true },
+        "continueOnFail": true
+      },
+      "id": "b1a2c3d4-0003-4000-a000-000000000003",
+      "name": "Create Qdrant Collection",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [660, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://www.googleapis.com/youtube/v3/playlistItems",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "part",       "value": "snippet" },
+            { "name": "playlistId", "value": "={{ $('Config').first().json.playlist_id }}" },
+            { "name": "maxResults", "value": "50" },
+            { "name": "key",        "value": "={{ $('Config').first().json.youtube_api_key }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b1a2c3d4-0004-4000-a000-000000000004",
+      "name": "Fetch Playlist Page 1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [880, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.first().json.items || [];\nconst config = $('Config').first().json;\n\nreturn items\n  .filter(item => item.snippet?.resourceId?.videoId)\n  .map(item => ({\n    json: {\n      video_id: item.snippet.resourceId.videoId,\n      collection: config.collection,\n      chunk_size: config.chunk_size,\n      embedding_model: config.embedding_model\n    }\n  }));"
+      },
+      "id": "b1a2c3d4-0005-4000-a000-000000000005",
+      "name": "Extract Video IDs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1100, 300]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "b1a2c3d4-0006-4000-a000-000000000006",
+      "name": "Loop Videos",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [1320, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').first().json.scraper_url + '/transcript' }}",
+        "sendBody": true,
+        "specifyBody": "keypair",
+        "bodyParameters": {
+          "parameters": [
+            { "name": "video_id",   "value": "={{ $json.video_id }}" },
+            { "name": "chunk_size", "value": "={{ $json.chunk_size }}" },
+            { "name": "langs",      "value": "={{ $('Config').first().json.langs.split(',') }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b1a2c3d4-0007-4000-a000-000000000007",
+      "name": "Get Transcript",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1540, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const transcript = $input.first().json;\nconst config = $('Config').first().json;\n\nif (!transcript.chunks || transcript.chunks.length === 0) {\n  return [{ json: { status: 'skipped', video_id: transcript.video_id || 'unknown' } }];\n}\n\nfunction hashId(str) {\n  let h = 2166136261;\n  for (let i = 0; i < str.length; i++) {\n    h = Math.imul(h ^ str.charCodeAt(i), 16777619) >>> 0;\n  }\n  const hex = h.toString(16).padStart(8, '0').repeat(4).slice(0, 32);\n  return `${hex.slice(0,8)}-${hex.slice(8,12)}-4${hex.slice(12,15)}-a${hex.slice(15,18)}-${hex.slice(18,30)}`;\n}\n\nasync function embedBatch(texts) {\n  for (let attempt = 0; attempt < 4; attempt++) {\n    try {\n      const resp = await this.helpers.httpRequest({\n        method: 'POST',\n        url: config.embedding_url + '/v1/embeddings',\n        headers: { Authorization: 'Bearer ' + config.openrouter_api_key },\n        body: { model: config.embedding_model, input: texts },\n        json: true,\n      });\n      return resp.data.map(d => d.embedding);\n    } catch (err) {\n      if (attempt === 3) throw err;\n      await new Promise(r => setTimeout(r, 2000 * Math.pow(2, attempt)));\n    }\n  }\n}\n\nconst EMBED_BATCH = config.embed_batch_size || 50;\nconst chunks = transcript.chunks;\nconst allVectors = [];\n\nfor (let i = 0; i < chunks.length; i += EMBED_BATCH) {\n  const batch = chunks.slice(i, i + EMBED_BATCH);\n  const vectors = await embedBatch.call(this, batch.map(c => c.text));\n  allVectors.push(...vectors);\n  if (i + EMBED_BATCH < chunks.length) {\n    await new Promise(r => setTimeout(r, 600));\n  }\n}\n\nconst points = chunks.map((chunk, idx) => ({\n  id: hashId(`${transcript.video_id}_${chunk.chunk_id}`),\n  vector: allVectors[idx],\n  payload: {\n    video_id: transcript.video_id,\n    title:    transcript.title,\n    channel:  transcript.channel,\n    url:      transcript.url,\n    chunk_id: chunk.chunk_id,\n    text:     chunk.text,\n  },\n}));\n\nconst QDRANT_BATCH = 100;\nfor (let i = 0; i < points.length; i += QDRANT_BATCH) {\n  await this.helpers.httpRequest({\n    method: 'PUT',\n    url: config.qdrant_url + '/collections/' + config.collection + '/points',\n    body: { points: points.slice(i, i + QDRANT_BATCH) },\n    json: true,\n  });\n}\n\nreturn [{ json: { status: 'ok', video_id: transcript.video_id, title: transcript.title, chunks_stored: chunks.length } }];"
+      },
+      "id": "b1a2c3d4-0008-4000-a000-000000000008",
+      "name": "Embed and Ingest Chunks",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1760, 300]
+    }
+  ],
+  "connections": {
+    "Manual Trigger":          { "main": [[{ "node": "Config",                  "type": "main", "index": 0 }]] },
+    "Config":                  { "main": [[{ "node": "Create Qdrant Collection", "type": "main", "index": 0 }]] },
+    "Create Qdrant Collection":{ "main": [[{ "node": "Fetch Playlist Page 1",   "type": "main", "index": 0 }]] },
+    "Fetch Playlist Page 1":   { "main": [[{ "node": "Extract Video IDs",       "type": "main", "index": 0 }]] },
+    "Extract Video IDs":       { "main": [[{ "node": "Loop Videos",             "type": "main", "index": 0 }]] },
+    "Loop Videos": {
+      "main": [
+        [],
+        [{ "node": "Get Transcript",       "type": "main", "index": 0 }]
+      ]
+    },
+    "Get Transcript":          { "main": [[{ "node": "Embed and Ingest Chunks", "type": "main", "index": 0 }]] },
+    "Embed and Ingest Chunks": { "main": [[{ "node": "Loop Videos",             "type": "main", "index": 0 }]] }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "saveExecutionProgress": true
+  },
+  "meta": { "instanceId": "youtube-rag-n8n" }
+}
