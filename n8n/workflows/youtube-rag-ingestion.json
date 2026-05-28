@@ -36,53 +36,13 @@
     },
     {
       "parameters": {
-        "method": "GET",
-        "url": "={{ $('Config').first().json.qdrant_url + '/collections/' + $('Config').first().json.collection }}",
-        "options": {}
+        "jsCode": "const config = $('Config').first().json;\nconst url = config.qdrant_url + '/collections/' + config.collection;\n\nlet exists = false;\ntry {\n  const resp = await this.helpers.httpRequest({ method: 'GET', url, json: true });\n  exists = resp && resp.result && resp.result.status === 'green';\n} catch (e) {\n  exists = false;\n}\n\nif (!exists) {\n  await this.helpers.httpRequest({\n    method: 'PUT',\n    url,\n    body: { vectors: { size: 2048, distance: 'Cosine' } },\n    json: true,\n  });\n}\n\nreturn [{ json: { collection: config.collection, created: !exists } }];"
       },
       "id": "b1a2c3d4-0003-4000-a000-000000000003",
-      "name": "Check Collection Exists",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [660, 300],
-      "continueOnFail": true
-    },
-    {
-      "parameters": {
-        "conditions": {
-          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
-          "conditions": [
-            {
-              "id": "cond-01",
-              "leftValue": "={{ $json.result?.status }}",
-              "rightValue": "green",
-              "operator": { "type": "string", "operation": "notEquals" }
-            }
-          ],
-          "combinator": "and"
-        },
-        "options": {}
-      },
-      "id": "b1a2c3d4-0009-4000-a000-000000000009",
-      "name": "IF Collection Missing?",
-      "type": "n8n-nodes-base.if",
+      "name": "Ensure Collection",
+      "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [880, 300]
-    },
-    {
-      "parameters": {
-        "method": "PUT",
-        "url": "={{ $('Config').first().json.qdrant_url + '/collections/' + $('Config').first().json.collection }}",
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={\"vectors\":{\"size\":2048,\"distance\":\"Cosine\"}}",
-        "options": {}
-      },
-      "id": "b1a2c3d4-0003b-4000-a000-00000000000b",
-      "name": "Create Qdrant Collection",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [1100, 180]
+      "position": [660, 300]
     },
     {
       "parameters": {
@@ -192,15 +152,8 @@
   ],
   "connections": {
     "Manual Trigger":          { "main": [[{ "node": "Config",                   "type": "main", "index": 0 }]] },
-    "Config":                  { "main": [[{ "node": "Check Collection Exists",  "type": "main", "index": 0 }]] },
-    "Check Collection Exists": { "main": [[{ "node": "IF Collection Missing?",   "type": "main", "index": 0 }]] },
-    "IF Collection Missing?": {
-      "main": [
-        [{ "node": "Create Qdrant Collection", "type": "main", "index": 0 }],
-        [{ "node": "Fetch Playlist Page 1",    "type": "main", "index": 0 }]
-      ]
-    },
-    "Create Qdrant Collection":{ "main": [[{ "node": "Fetch Playlist Page 1",   "type": "main", "index": 0 }]] },
+    "Config":             { "main": [[{ "node": "Ensure Collection",    "type": "main", "index": 0 }]] },
+    "Ensure Collection":  { "main": [[{ "node": "Fetch Playlist Page 1", "type": "main", "index": 0 }]] },
     "Fetch Playlist Page 1":   { "main": [[{ "node": "Extract Video IDs",        "type": "main", "index": 0 }]] },
     "Extract Video IDs":       { "main": [[{ "node": "Loop Videos",              "type": "main", "index": 0 }]] },
     "Loop Videos": {
