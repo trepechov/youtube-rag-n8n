@@ -185,4 +185,42 @@ As a follow-on, the chat API could detect explicit recency language in the query
 - Should `published_at` be stored as a string or a Unix timestamp integer? Qdrant supports range filters on integers, which is cleaner for the date-filter enhancement above. Recommend storing as `published_at_ts` (Unix epoch seconds) in addition to the ISO string.
 - What is the right staleness threshold? Two years is the stated default; make it configurable via an env var (`STALENESS_THRESHOLD_DAYS`, default `730`).
 
+## OpenAI-Compatible API & Embeddable Chat
+
+**Goal:** Expose the RAG pipeline as a standard `POST /v1/chat/completions` endpoint so any off-the-shelf chat client can connect to it, and serve a self-contained iframe chat page for embedding on external websites and WordPress.
+
+> Full spec and implementation order: `docs/openai-compatible-embed.md`
+
+### How it works
+
+- The `model` field doubles as a collection selector: `rag:podcasts`, `rag:finance-channel`, etc. Any non-`rag:` value falls back to the default collection.
+- The embed page (`GET /embed?collection=...`) is served as inline HTML from chat-api — no new service, no build step.
+- A WordPress plugin wraps the embed URL in a shortcode: `[rag_chat collection="podcasts"]`.
+- For local development, Open WebUI runs as an optional Docker service (`--profile dev`) and points at the new endpoint.
+
+### Changes needed
+
+**`chat-api/main.py`**
+- Add `POST /v1/chat/completions` — accepts standard OpenAI messages, routes collection via `model` field, returns OpenAI-shaped response.
+- Add `GET /embed` — returns a self-contained HTML chat page (vanilla JS, no build); takes `?collection` and `?title` query params.
+
+**`docker-compose.yml`**
+- Add `open-webui` service under `profiles: [dev]`; points `OPENAI_API_BASE_URL` at `http://chat-api:8000/v1`. Starts only when `docker compose --profile dev up` is run.
+
+**`wordpress-plugin/youtube-rag-chat.php`** _(new file)_
+- Single PHP file; registers `[rag_chat collection="..." url="..." height="..."]` shortcode that outputs the iframe. Drop into `wp-content/plugins/`, no dependencies.
+
+### What is NOT changing
+
+- Existing `/chat` endpoint and widget — untouched.
+- Qdrant schema, n8n workflow, scraper-service — no changes.
+- No new Dockerfiles or Python services.
+
+### Implementation order
+
+1. `POST /v1/chat/completions` in `chat-api/main.py` — unblocks all client testing
+2. Open WebUI dev service in `docker-compose.yml` — local chat UI
+3. `GET /embed` in `chat-api/main.py` — iframe story
+4. `wordpress-plugin/youtube-rag-chat.php` — WordPress plugin
+
 <!-- Add new features below this line -->
