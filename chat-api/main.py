@@ -1,4 +1,5 @@
 import os
+import uuid
 from typing import Optional
 
 import httpx
@@ -99,8 +100,11 @@ FALLBACK_MODELS = [
 async def _call_openrouter(question: str, context: str, model: str) -> str:
     system_prompt = (
         "You are a helpful assistant that answers questions based on podcast transcript excerpts. "
+        "Always answer in the same language the user used to ask the question. "
+        "The transcript excerpts are auto-generated and may lack punctuation or have rough phrasing — "
+        "synthesise a clean, fluent, grammatically correct answer from the content; never copy raw transcript text verbatim. "
         "Use only the provided context to answer. If the answer is not in the context, say so honestly. "
-        "Be concise and cite the video title when referencing specific content."
+        "Cite the episode title when referencing specific content."
     )
     user_message = f"Context from podcast transcripts:\n\n{context}\n\nQuestion: {question}"
 
@@ -134,12 +138,104 @@ async def _call_openrouter(question: str, context: str, model: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# OpenAI-compatible models
+# ---------------------------------------------------------------------------
+
+class OAIMessage(BaseModel):
+    role: str
+    content: str
+
+class OAIRequest(BaseModel):
+    model: str = "rag:podcasts"
+    messages: list[OAIMessage]
+    stream: bool = False
+
+class OAIChoice(BaseModel):
+    index: int = 0
+    message: OAIMessage
+    finish_reason: str = "stop"
+
+class OAIResponse(BaseModel):
+    id: str
+    object: str = "chat.completion"
+    model: str
+    choices: list[OAIChoice]
+
+
+def _collection_from_model(model: str) -> str:
+    if model.startswith("rag:"):
+        slug = model[4:]
+        return slug if slug else DEFAULT_COLLECTION
+    return DEFAULT_COLLECTION
+
+
+# ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
 
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/v1/models")
+async def list_models():
+    async with httpx.AsyncClient(timeout=10) as client:
+        try:
+            resp = await client.get(f"{QDRANT_URL}/collections")
+            collections = [c["name"] for c in resp.json().get("result", {}).get("collections", [])]
+        except Exception:
+            collections = [DEFAULT_COLLECTION]
+    return {
+        "object": "list",
+        "data": [
+            {"id": f"rag:{c}", "object": "model", "created": 0, "owned_by": "youtube-rag"}
+            for c in collections
+        ],
+    }
+
+
+@app.post("/v1/chat/completions", response_model=OAIResponse)
+async def oai_chat(req: OAIRequest):
+    user_msgs = [m for m in req.messages if m.role == "user"]
+    if not user_msgs:
+        raise HTTPException(status_code=400, detail="No user message provided")
+    question = user_msgs[-1].content
+    collection = _collection_from_model(req.model)
+
+    try:
+        vector = await _get_embedding(question)
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(status_code=502, detail=f"Embedding failed: {exc.response.text[:200]}")
+    except httpx.ConnectError:
+        raise HTTPException(status_code=503, detail="Embedding service unavailable")
+
+    results = await _search_qdrant(collection, vector, top_k=5)
+
+    if not results:
+        answer = "I couldn't find relevant content in the knowledge base. Try ingesting some playlists first."
+    else:
+        context_parts = []
+        source_lines = []
+        for r in results:
+            p = r["payload"]
+            context_parts.append(f"[{p.get('title', 'Unknown')}]\n{p.get('text', '')}")
+            url = p.get("url", f"https://youtube.com/watch?v={p.get('video_id', '')}")
+            source_lines.append(f"- [{p.get('title', 'Unknown')}]({url})")
+        context = "\n\n---\n\n".join(context_parts)
+
+        try:
+            answer = await _call_openrouter(question, context, DEFAULT_MODEL)
+        except httpx.HTTPStatusError as exc:
+            raise HTTPException(status_code=502, detail=f"LLM call failed: {exc.response.text[:200]}")
+
+        answer = f"{answer}\n\n**Sources:**\n" + "\n".join(source_lines)
+
+    return OAIResponse(
+        id=f"chatcmpl-{uuid.uuid4().hex[:12]}",
+        model=req.model,
+        choices=[OAIChoice(message=OAIMessage(role="assistant", content=answer))],
+    )
 
 
 @app.post("/chat", response_model=ChatResponse)

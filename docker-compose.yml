@@ -81,6 +81,21 @@ services:
     networks:
       - internal
 
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    profiles: [dev]
+    restart: unless-stopped
+    ports:
+      - "3000:8080"
+    environment:
+      OPENAI_API_BASE_URL: http://chat-api:8000/v1
+      OPENAI_API_KEY: "local"
+      WEBUI_AUTH: "False"
+    depends_on:
+      - chat-api
+    networks:
+      - internal
+
 volumes:
   postgres_data:
   n8n_data:
