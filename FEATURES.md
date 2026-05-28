@@ -41,7 +41,9 @@ Planned features and improvements for the YouTube RAG system.
 
 ---
 
-## Idempotent Re-runs / Skip Already-Processed Videos
+## ~~Idempotent Re-runs / Skip Already-Processed Videos~~ ✓ Completed
+
+> Implemented in `n8n/workflows/youtube-rag-ingestion.json`. See `docs/idempotent-reruns.md` for full spec.
 
 **Goal:** When the ingestion workflow runs again (e.g. to pick up new videos added to a playlist), skip videos that are already in Qdrant instead of re-downloading, re-embedding, and overwriting them.
 
