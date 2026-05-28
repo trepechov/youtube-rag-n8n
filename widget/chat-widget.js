@@ -176,10 +176,11 @@
         seen.add(s.video_id);
         const a = document.createElement("a");
         a.className = "yt-rag-source-link";
-        a.href = s.url;
+        a.href = s.timestamp_url || s.url;
         a.target = "_blank";
         a.rel = "noopener noreferrer";
-        a.textContent = `▶ ${s.title}`;
+        const timeLabel = s.start_time != null ? ` · ${_formatTime(s.start_time)}` : "";
+        a.textContent = `▶ ${s.title}${timeLabel}`;
         srcEl.appendChild(a);
       });
 
@@ -207,6 +208,14 @@
 
   function scrollBottom() {
     messages.scrollTop = messages.scrollHeight;
+  }
+
+  function _formatTime(seconds) {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = seconds % 60;
+    if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+    return `${m}:${String(s).padStart(2, "0")}`;
   }
 
   function _esc(str) {

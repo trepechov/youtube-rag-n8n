@@ -49,6 +49,8 @@ class Source(BaseModel):
     text: str
     url: str
     score: float
+    start_time: Optional[int] = None
+    timestamp_url: Optional[str] = None
 
 
 class ChatResponse(BaseModel):
@@ -221,7 +223,9 @@ async def oai_chat(req: OAIRequest):
             p = r["payload"]
             context_parts.append(f"[{p.get('title', 'Unknown')}]\n{p.get('text', '')}")
             url = p.get("url", f"https://youtube.com/watch?v={p.get('video_id', '')}")
-            source_lines.append(f"- [{p.get('title', 'Unknown')}]({url})")
+            start_time = p.get("start_time")
+            link = f"{url}&t={start_time}" if start_time is not None else url
+            source_lines.append(f"- [{p.get('title', 'Unknown')}]({link})")
         context = "\n\n---\n\n".join(context_parts)
 
         try:
@@ -263,13 +267,18 @@ async def chat(req: ChatRequest):
 
     for r in results:
         p = r["payload"]
+        url = p.get("url", f"https://youtube.com/watch?v={p.get('video_id', '')}")
+        start_time = p.get("start_time")
+        timestamp_url = f"{url}&t={start_time}" if start_time is not None else None
         sources.append(Source(
             video_id=p.get("video_id", ""),
             title=p.get("title", "Unknown"),
             channel=p.get("channel", ""),
             text=p.get("text", ""),
-            url=p.get("url", f"https://youtube.com/watch?v={p.get('video_id', '')}"),
+            url=url,
             score=round(r["score"], 4),
+            start_time=start_time,
+            timestamp_url=timestamp_url,
         ))
         context_parts.append(f"[{p.get('title', 'Unknown')}]\n{p.get('text', '')}")
 

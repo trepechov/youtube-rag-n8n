@@ -21,6 +21,7 @@ class TranscriptRequest(BaseModel):
 class Chunk(BaseModel):
     chunk_id: int
     text: str
+    start_time: Optional[int] = None
 
 
 class TranscriptResponse(BaseModel):
@@ -83,67 +84,102 @@ def _download_transcript(video_id: str, langs: list[str]) -> dict:
         if not vtt_files:
             raise RuntimeError("No subtitles found — video may have no captions")
 
-        transcript_text = _parse_vtt(vtt_files[0].read_text(encoding="utf-8"))
+        segments = _parse_vtt(vtt_files[0].read_text(encoding="utf-8"))
 
         return {
             "id": metadata["id"],
             "title": metadata["title"],
             "channel": metadata["channel"],
-            "transcript": transcript_text,
+            "segments": segments,
         }
 
 
-def _parse_vtt(content: str) -> str:
+def _parse_vtt(content: str) -> list[tuple[int, str]]:
+    """Parse VTT into (start_seconds, text) segments, deduplicating rolling-window cues."""
+    segments: list[tuple[int, str]] = []
     seen: set[str] = set()
-    lines: list[str] = []
+    current_start: int = 0
+    in_cue = False
 
-    for line in content.splitlines():
-        line = line.strip()
-        # Skip timing/metadata lines
+    for raw in content.splitlines():
+        line = raw.strip()
+
+        if not line:
+            in_cue = False
+            continue
+
+        if "-->" in line:
+            start_str = line.split("-->")[0].strip()
+            try:
+                parts = start_str.split(":")
+                if len(parts) == 3:
+                    h, m, s = parts
+                    current_start = int(h) * 3600 + int(m) * 60 + int(float(s.replace(",", ".")))
+                elif len(parts) == 2:
+                    m, s = parts
+                    current_start = int(m) * 60 + int(float(s.replace(",", ".")))
+            except (ValueError, IndexError):
+                pass
+            in_cue = True
+            continue
+
         if (
-            not line
-            or "-->" in line
-            or re.match(r"^\d{2}:\d{2}", line)
-            or line.startswith("WEBVTT")
+            line.startswith("WEBVTT")
             or line.startswith("NOTE")
             or re.match(r"^[0-9]+$", line)
+            or re.match(r"^\d{2}:\d{2}", line)
         ):
             continue
-        # Strip HTML tags and decode entities
+
+        if not in_cue:
+            continue
+
         clean = re.sub(r"<[^>]+>", "", line)
-        clean = clean.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">").replace("&nbsp;", " ")
-        clean = clean.strip()
+        clean = (
+            clean.replace("&amp;", "&")
+                 .replace("&lt;", "<")
+                 .replace("&gt;", ">")
+                 .replace("&nbsp;", " ")
+                 .strip()
+        )
         if clean and clean not in seen:
-            lines.append(clean)
             seen.add(clean)
+            segments.append((current_start, clean))
 
-    return " ".join(lines)
+    return segments
 
 
-def _chunk_text(text: str, chunk_size: int) -> list[str]:
-    # Split on sentence boundaries, accumulate until chunk_size
-    sentences = re.split(r"(?<=[.!?])\s+", text)
-    chunks: list[str] = []
-    current = ""
+def _chunk_segments(segments: list[tuple[int, str]], chunk_size: int) -> list[Chunk]:
+    """Chunk (start_seconds, text) segments into Chunk objects, recording each chunk's start time."""
+    chunks: list[Chunk] = []
+    current_text = ""
+    current_start: int = 0
+    chunk_id = 0
 
-    for sentence in sentences:
-        if len(current) + len(sentence) + 1 <= chunk_size:
-            current = f"{current} {sentence}".strip() if current else sentence
-        else:
-            if current:
-                chunks.append(current)
-            # If a single sentence exceeds chunk_size, hard-split it
-            if len(sentence) > chunk_size:
-                for i in range(0, len(sentence), chunk_size):
-                    chunks.append(sentence[i : i + chunk_size])
-                current = ""
+    for seg_start, seg_text in segments:
+        sentences = re.split(r"(?<=[.!?])\s+", seg_text)
+        for sentence in sentences:
+            if not current_text:
+                current_start = seg_start
+            if len(current_text) + len(sentence) + (1 if current_text else 0) <= chunk_size:
+                current_text = f"{current_text} {sentence}".strip() if current_text else sentence
             else:
-                current = sentence
+                if current_text:
+                    chunks.append(Chunk(chunk_id=chunk_id, text=current_text, start_time=current_start))
+                    chunk_id += 1
+                if len(sentence) > chunk_size:
+                    for i in range(0, len(sentence), chunk_size):
+                        chunks.append(Chunk(chunk_id=chunk_id, text=sentence[i:i + chunk_size], start_time=seg_start))
+                        chunk_id += 1
+                    current_text = ""
+                else:
+                    current_text = sentence
+                    current_start = seg_start
 
-    if current:
-        chunks.append(current)
+    if current_text:
+        chunks.append(Chunk(chunk_id=chunk_id, text=current_text, start_time=current_start))
 
-    return [c for c in chunks if c.strip()]
+    return chunks
 
 
 # ---------------------------------------------------------------------------
@@ -164,12 +200,12 @@ def get_transcript(req: TranscriptRequest):
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Unexpected error: {exc}")
 
-    chunks = _chunk_text(data["transcript"], req.chunk_size)
+    chunks = _chunk_segments(data["segments"], req.chunk_size)
 
     return TranscriptResponse(
         video_id=data["id"],
         title=data["title"],
         channel=data["channel"],
         url=f"https://www.youtube.com/watch?v={data['id']}",
-        chunks=[Chunk(chunk_id=i, text=t) for i, t in enumerate(chunks)],
+        chunks=chunks,
     )
