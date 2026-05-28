@@ -137,7 +137,8 @@
       "name": "Get Transcript",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [2420, 300]
+      "position": [2420, 300],
+      "continueOnFail": true
     },
     {
       "parameters": {
