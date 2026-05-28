@@ -1,0 +1,208 @@
+/* YouTube RAG Chat Widget */
+#yt-rag-widget * {
+  box-sizing: border-box;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+/* Toggle button */
+#yt-rag-toggle {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: #2563eb;
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(37, 99, 235, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+#yt-rag-toggle:hover {
+  transform: scale(1.08);
+  box-shadow: 0 6px 20px rgba(37, 99, 235, 0.5);
+}
+#yt-rag-toggle svg {
+  width: 24px;
+  height: 24px;
+}
+
+/* Chat window */
+#yt-rag-window {
+  position: fixed;
+  bottom: 92px;
+  right: 24px;
+  width: 380px;
+  max-width: calc(100vw - 48px);
+  height: 520px;
+  max-height: calc(100vh - 120px);
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.18);
+  display: flex;
+  flex-direction: column;
+  z-index: 9998;
+  overflow: hidden;
+  transition: opacity 0.2s, transform 0.2s;
+}
+#yt-rag-window.hidden {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(12px);
+}
+
+/* Header */
+#yt-rag-header {
+  background: #2563eb;
+  color: #fff;
+  padding: 14px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+}
+#yt-rag-header-title {
+  font-size: 15px;
+  font-weight: 600;
+}
+#yt-rag-header-subtitle {
+  font-size: 11px;
+  opacity: 0.8;
+  margin-top: 2px;
+}
+#yt-rag-close {
+  background: none;
+  border: none;
+  color: #fff;
+  cursor: pointer;
+  opacity: 0.8;
+  padding: 4px;
+  border-radius: 4px;
+  display: flex;
+}
+#yt-rag-close:hover { opacity: 1; }
+
+/* Messages */
+#yt-rag-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.yt-rag-msg {
+  max-width: 88%;
+  padding: 10px 14px;
+  border-radius: 12px;
+  font-size: 14px;
+  line-height: 1.5;
+  word-wrap: break-word;
+}
+.yt-rag-msg.user {
+  background: #2563eb;
+  color: #fff;
+  align-self: flex-end;
+  border-bottom-right-radius: 4px;
+}
+.yt-rag-msg.bot {
+  background: #f1f5f9;
+  color: #1e293b;
+  align-self: flex-start;
+  border-bottom-left-radius: 4px;
+}
+.yt-rag-msg.error {
+  background: #fef2f2;
+  color: #dc2626;
+  align-self: flex-start;
+}
+
+/* Sources */
+.yt-rag-sources {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #64748b;
+  border-top: 1px solid #e2e8f0;
+  padding-top: 6px;
+}
+.yt-rag-source-link {
+  color: #2563eb;
+  text-decoration: none;
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 3px;
+}
+.yt-rag-source-link:hover { text-decoration: underline; }
+
+/* Typing indicator */
+.yt-rag-typing {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  padding: 12px 14px;
+  background: #f1f5f9;
+  border-radius: 12px;
+  border-bottom-left-radius: 4px;
+  align-self: flex-start;
+}
+.yt-rag-typing span {
+  width: 7px;
+  height: 7px;
+  background: #94a3b8;
+  border-radius: 50%;
+  animation: ytRagBounce 1.2s infinite ease-in-out;
+}
+.yt-rag-typing span:nth-child(2) { animation-delay: 0.2s; }
+.yt-rag-typing span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes ytRagBounce {
+  0%, 60%, 100% { transform: translateY(0); }
+  30% { transform: translateY(-6px); }
+}
+
+/* Input area */
+#yt-rag-input-area {
+  padding: 12px 16px;
+  border-top: 1px solid #e2e8f0;
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+#yt-rag-input {
+  flex: 1;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 9px 12px;
+  font-size: 14px;
+  resize: none;
+  outline: none;
+  max-height: 100px;
+  line-height: 1.4;
+  color: #1e293b;
+}
+#yt-rag-input:focus { border-color: #2563eb; }
+#yt-rag-send {
+  background: #2563eb;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  width: 38px;
+  height: 38px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  align-self: flex-end;
+  transition: background 0.15s;
+}
+#yt-rag-send:hover { background: #1d4ed8; }
+#yt-rag-send:disabled { background: #94a3b8; cursor: not-allowed; }
+#yt-rag-send svg { width: 16px; height: 16px; }
