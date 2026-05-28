@@ -128,62 +128,64 @@ This feature only works efficiently once **idempotent re-runs** are implemented.
 2. Scheduled trigger
 3. Pagination / `full_scan` mode for initial ingestion of large back-catalogues
 
-## Podcast Publication Date Metadata
+## Source Attribution: Publication Date & Timestamp Links
 
-**Goal:** Attach the YouTube video's publish date to every Qdrant point so the RAG pipeline can surface temporal context, warn about stale results, and let users trace answers back to a specific episode.
+**Goal:** Surface two complementary pieces of metadata alongside every chat answer — (1) the episode's publication date for staleness detection, and (2) a direct deeplink into the video at the exact moment the answer came from.
+
+> Full implementation plan for the timestamp deeplink feature: `docs/chunk-timestamp-attribution.md`
 
 ### Why this matters
 
-- A user asking "what's the current best practice for X?" expects recent guidance. An answer drawn from a 3-year-old episode may be actively misleading.
-- Without a date field the system has no signal to detect this mismatch.
-- The date also doubles as a lightweight source reference — "this was from the episode published 2023-11-14" is enough for a user to locate the podcast.
+- A user asking "what's the current best practice for X?" expects recent guidance. An answer drawn from a 3-year-old episode may be actively misleading. Without a date field the system has no signal to detect this mismatch.
+- For long-form content (podcasts, lectures) a bare video URL forces the user to scrub manually. VTT subtitle files downloaded by `yt-dlp` already contain per-second timestamps for every spoken line — this data is currently discarded during parsing. Preserving it enables deeplinks of the form `https://youtube.com/watch?v=VIDEO_ID&t=SECONDS` that jump directly to the relevant moment.
 
-### Metadata field
+### Two metadata fields
 
-Add `published_at` (ISO-8601 date string, e.g. `"2023-11-14"`) to every Qdrant point payload alongside `video_id`, `chunk_id`, and (once implemented) `playlist_id`.
+Both fields are additive to the existing Qdrant payload (`video_id`, `title`, `channel`, `url`, `chunk_id`, `text`):
 
 ```json
 {
   "video_id": "abc123",
   "chunk_id": 4,
+  "start_time": 754,
   "published_at": "2023-11-14",
-  "title": "Episode 42 — …",
-  "playlist_id": "PL…"
+  "title": "Episode 42 — …"
 }
 ```
 
+- **`start_time`** — integer, seconds from video start. Derived from VTT cue timestamps during scraping. `null` when no subtitle file is available. Powers the "Watch at MM:SS" deeplink per source.
+- **`published_at`** — ISO-8601 date string (e.g. `"2023-11-14"`). Read from `snippet.publishedAt` in the YouTube playlist API response. Powers staleness detection and episode-level citation.
+
 ### Changes needed
 
-**Scraper service**
-- The YouTube `playlistItems` API response already includes `snippet.publishedAt` per video. Pass it through in the transcript response as `published_at`.
-- Alternatively, the n8n workflow can read it directly from the playlist page response — it is already present in the "Fetch Playlist" node's output.
+**Scraper service** (`start_time` only)
+- `_parse_vtt()`: return `List[Tuple[int, str]]` (start_seconds, text) instead of stripping timestamps to plain text.
+- `_chunk_transcript()`: track the start time of the first VTT segment in each chunk; attach it to the `Chunk` dataclass as `start_time: Optional[int]`.
+- `/transcript` response: include `start_time` in each chunk object.
 
 **n8n workflow**
-- After "Fetch Playlist", map `snippet.publishedAt` → `published_at` for each video.
-- Include `published_at` in the "Build Qdrant Point" node's payload alongside existing fields.
+- "Embed and Ingest Chunks" node: add `start_time` from chunk data to the Qdrant point payload.
+- After "Fetch Playlist", map `snippet.publishedAt` → `published_at` for each video and include it in the Qdrant point payload.
 
-**Chat API — staleness detection**
-- After Qdrant returns search results, inspect `published_at` on the top-k hits.
-- If **all** top results are older than 2 years (relative to the current date), prepend a disclaimer to the LLM context:
-  > "Note: the most relevant sources found are more than 2 years old (newest: {date}). The information may be outdated."
-- Surface this as a `stale_sources: true` flag in the `/chat` response body so the widget can render a visible warning.
-
-**Chat API — source attribution in answers**
-- Include `published_at` and `title` (or `video_id`) in the context block sent to the LLM, so the model can cite them naturally.
-- Return the source list (title + date + video URL reconstructed from `video_id`) in the API response under a `sources` field for the widget to display.
+**Chat API**
+- `Source` model: add `start_time: Optional[int]` and `timestamp_url: Optional[str]` (the deeplink).
+- `/chat` endpoint: map `start_time` from Qdrant payload; compute `timestamp_url = url + "&t=" + start_time`.
+- Staleness detection: if all top-k results have `published_at` older than a configurable threshold (`STALENESS_THRESHOLD_DAYS`, default `730`), prepend a disclaimer to the LLM context and return `stale_sources: true` in the response body.
+- Include `published_at` in the context block sent to the LLM so the model can cite episodes naturally.
 
 **Widget**
-- Render the `sources` list beneath each assistant response.
-- If `stale_sources: true`, show a "Sources may be outdated" badge.
+- Render a "Watch at MM:SS" link per source when `timestamp_url` is present.
+- Show a "Sources may be outdated" badge when `stale_sources: true`.
 
 ### Temporal query intent (future enhancement)
 
-As a follow-on, the chat API could detect explicit recency language in the query ("recently", "latest", "current", "in the last year") and automatically apply a Qdrant date range filter (`published_at >= now - 2 years`) so that semantically distant but recent content is not suppressed by older, higher-scoring hits. This is additive and can be implemented independently once the `published_at` field is in place.
+Once `published_at` is in place, the chat API can detect explicit recency language in a query ("recently", "latest", "current") and automatically apply a Qdrant date range filter so that semantically distant but recent content is not suppressed by older, higher-scoring hits.
 
 ### Open questions
 
-- Should `published_at` be stored as a string or a Unix timestamp integer? Qdrant supports range filters on integers, which is cleaner for the date-filter enhancement above. Recommend storing as `published_at_ts` (Unix epoch seconds) in addition to the ISO string.
-- What is the right staleness threshold? Two years is the stated default; make it configurable via an env var (`STALENESS_THRESHOLD_DAYS`, default `730`).
+- Should `published_at` also be stored as a Unix timestamp integer (`published_at_ts`) to support Qdrant numeric range filters? Recommend adding it alongside the ISO string from the start.
+- Should `timestamp_url` be injected into the LLM context block so the model can cite "as discussed at 12:34 in Episode 42…"? Adds tokens but produces more natural answers.
+- Re-ingestion of existing points (no `start_time`): forward-only (new videos only) or one-time backfill via a `force_refresh` flag in the Config node? See `docs/chunk-timestamp-attribution.md` for trade-offs.
 
 ## OpenAI-Compatible API & Embeddable Chat
 
