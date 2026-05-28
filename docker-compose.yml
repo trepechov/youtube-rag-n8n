@@ -1,0 +1,91 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: n8n
+      POSTGRES_USER: n8n
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - internal
+
+  n8n:
+    image: n8nio/n8n:latest
+    restart: unless-stopped
+    ports:
+      - "${N8N_PORT:-5678}:5678"
+    environment:
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: postgres
+      DB_POSTGRESDB_DATABASE: n8n
+      DB_POSTGRESDB_USER: n8n
+      DB_POSTGRESDB_PASSWORD: ${POSTGRES_PASSWORD}
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY}
+      WEBHOOK_URL: http://localhost:${N8N_PORT:-5678}/
+      GENERIC_TIMEZONE: UTC
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
+      # Env vars accessible inside n8n workflows via $env.*
+      YOUTUBE_API_KEY: ${YOUTUBE_API_KEY}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+      SCRAPER_SERVICE_URL: http://scraper-service:8001
+      EMBEDDING_SERVICE_URL: https://openrouter.ai/api
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-nvidia/llama-nemotron-embed-vl-1b-v2:free}
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-podcasts}
+    volumes:
+      - n8n_data:/home/node/.n8n
+    depends_on:
+      - postgres
+    networks:
+      - internal
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    restart: unless-stopped
+    ports:
+      - "${QDRANT_PORT:-6333}:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks:
+      - internal
+
+  scraper-service:
+    build: ./scraper-service
+    restart: unless-stopped
+    ports:
+      - "${SCRAPER_PORT:-8001}:8001"
+    environment:
+      YOUTUBE_API_KEY: ${YOUTUBE_API_KEY}
+    networks:
+      - internal
+
+  chat-api:
+    build:
+      context: .
+      dockerfile: chat-api/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${CHAT_API_PORT:-8000}:8000"
+    environment:
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-meta-llama/llama-3.1-8b-instruct:free}
+      EMBEDDING_SERVICE_URL: https://openrouter.ai/api
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-nvidia/llama-nemotron-embed-vl-1b-v2:free}
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-podcasts}
+      ALLOWED_ORIGINS: "*"
+    depends_on:
+      - qdrant
+    networks:
+      - internal
+
+volumes:
+  postgres_data:
+  n8n_data:
+  qdrant_data:
+
+networks:
+  internal:
+    driver: bridge

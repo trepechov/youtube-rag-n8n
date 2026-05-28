@@ -1,0 +1,33 @@
+.env
+.env.local
+.env.production
+
+# n8n data (contains credentials)
+n8n/data/
+
+# Local volumes / outputs
+local/
+*.json.local
+
+# Cookies (sensitive YouTube auth)
+cookies.txt
+**/cookies.txt
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Docker
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,73 @@
+# Production overrides — run with:
+#   docker compose -f docker-compose.prod.yml up -d
+#
+# Differences from local:
+#   - No direct port exposure (all traffic routes through nginx)
+#   - nginx reverse proxy added
+#   - restart: always (vs unless-stopped)
+#   - n8n basic auth enabled
+#   - CORS locked down to your domain
+
+services:
+  postgres:
+    restart: always
+
+  n8n:
+    restart: always
+    ports: []  # Remove direct exposure — nginx proxies /n8n/
+    environment:
+      WEBHOOK_URL: https://${DOMAIN}/n8n/
+      N8N_BASIC_AUTH_ACTIVE: "true"
+      N8N_BASIC_AUTH_USER: ${N8N_BASIC_AUTH_USER}
+      N8N_BASIC_AUTH_PASSWORD: ${N8N_BASIC_AUTH_PASSWORD}
+    networks:
+      - internal
+      - web
+
+  qdrant:
+    restart: always
+    ports: []  # Internal only in production
+
+  ollama:
+    restart: always
+    ports: []  # Internal only
+
+  scraper-service:
+    restart: always
+    ports: []  # Internal only
+
+  chat-api:
+    restart: always
+    ports: []  # nginx proxies /api/
+    environment:
+      ALLOWED_ORIGINS: "https://${DOMAIN}"
+    networks:
+      - internal
+      - web
+
+  nginx:
+    image: nginx:alpine
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./widget:/var/www/widget:ro
+      - nginx_certs:/etc/nginx/certs
+      - nginx_logs:/var/log/nginx
+    depends_on:
+      - chat-api
+      - n8n
+    networks:
+      - web
+
+volumes:
+  nginx_certs:
+  nginx_logs:
+
+networks:
+  web:
+    driver: bridge
+  internal:
+    driver: bridge
