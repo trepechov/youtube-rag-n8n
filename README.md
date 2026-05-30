@@ -17,7 +17,7 @@ End-to-end system that scrapes YouTube playlists, builds a vector knowledge base
 ### Step 1 — Clone the repo
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/trepechov/youtube-rag-n8n.git
 cd youtube-rag-n8n
 ```
 
