@@ -64,6 +64,18 @@ def _download_transcript(video_id: str, langs: list[str]) -> dict:
         if not metadata:
             metadata = {"id": video_id, "title": "Unknown Title", "channel": "Unknown Channel"}
 
+        # Fast-fail before attempting download: yt-dlp metadata already contains
+        # which subtitle tracks exist. Avoids two 180s download attempts on captionless videos.
+        if meta_result.returncode == 0 and meta_result.stdout.strip():
+            try:
+                m = json.loads(meta_result.stdout.strip())
+                has_auto = bool(m.get("automatic_captions"))
+                has_manual = bool(m.get("subtitles"))
+                if not has_auto and not has_manual:
+                    raise RuntimeError("No subtitles found — video has no captions")
+            except json.JSONDecodeError:
+                pass
+
         # Step 2: download subtitles (no --print here)
         sub_result = subprocess.run(
             base_cmd + [
@@ -81,6 +93,23 @@ def _download_transcript(video_id: str, langs: list[str]) -> dict:
         # Don't check returncode — yt-dlp may return non-zero if one lang gets
         # rate-limited while others succeeded. Check for files instead.
         vtt_files = sorted(Path(tmpdir).glob("*.vtt"))
+
+        # Fallback: if specified langs yielded nothing, grab whatever auto-subs exist.
+        # Covers videos where auto-generated captions use an unexpected language code.
+        if not vtt_files:
+            subprocess.run(
+                base_cmd + [
+                    "--skip-download",
+                    "--write-auto-subs",
+                    "--sub-langs", "all",
+                    "--sub-format", "vtt",
+                    "--output", f"{tmpdir}/%(id)s",
+                    url,
+                ],
+                capture_output=True, text=True, timeout=180,
+            )
+            vtt_files = sorted(Path(tmpdir).glob("*.vtt"))
+
         if not vtt_files:
             raise RuntimeError("No subtitles found — video may have no captions")
 

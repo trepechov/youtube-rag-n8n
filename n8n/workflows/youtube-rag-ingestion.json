@@ -7,23 +7,81 @@
       "name": "Manual Trigger",
       "type": "n8n-nodes-base.manualTrigger",
       "typeVersion": 1,
-      "position": [220, 300]
+      "position": [
+        220,
+        300
+      ]
     },
     {
       "parameters": {
         "assignments": {
           "assignments": [
-            { "id": "cfg-01", "name": "playlist_id",        "value": "REPLACE_WITH_YOUR_PLAYLIST_ID",         "type": "string" },
-            { "id": "cfg-02", "name": "youtube_api_key",    "value": "REPLACE_WITH_YOUR_YOUTUBE_API_KEY",     "type": "string" },
-            { "id": "cfg-03", "name": "collection",         "value": "podcasts",                              "type": "string" },
-            { "id": "cfg-04", "name": "chunk_size",         "value": 1200,                                    "type": "number" },
-            { "id": "cfg-05", "name": "embedding_model",    "value": "nvidia/llama-nemotron-embed-vl-1b-v2:free", "type": "string" },
-            { "id": "cfg-06", "name": "qdrant_url",         "value": "http://qdrant:6333",                    "type": "string" },
-            { "id": "cfg-07", "name": "scraper_url",        "value": "http://scraper-service:8001",           "type": "string" },
-            { "id": "cfg-08", "name": "embedding_url",      "value": "https://openrouter.ai/api",             "type": "string" },
-            { "id": "cfg-09", "name": "langs",              "value": "bg-orig,bg,en,en-GB",                   "type": "string" },
-            { "id": "cfg-10", "name": "openrouter_api_key", "value": "REPLACE_WITH_YOUR_OPENROUTER_API_KEY",  "type": "string" },
-            { "id": "cfg-11", "name": "embed_batch_size",   "value": 50,                                      "type": "number" }
+            {
+              "id": "cfg-01",
+              "name": "playlist_id",
+              "value": "REPLACE_WITH_YOUR_PLAYLIST_ID",
+              "type": "string"
+            },
+            {
+              "id": "cfg-02",
+              "name": "youtube_api_key",
+              "value": "REPLACE_WITH_YOUR_YOUTUBE_API_KEY",
+              "type": "string"
+            },
+            {
+              "id": "cfg-03",
+              "name": "collection",
+              "value": "podcasts",
+              "type": "string"
+            },
+            {
+              "id": "cfg-04",
+              "name": "chunk_size",
+              "value": 1200,
+              "type": "number"
+            },
+            {
+              "id": "cfg-05",
+              "name": "embedding_model",
+              "value": "nvidia/llama-nemotron-embed-vl-1b-v2:free",
+              "type": "string"
+            },
+            {
+              "id": "cfg-06",
+              "name": "qdrant_url",
+              "value": "http://qdrant:6333",
+              "type": "string"
+            },
+            {
+              "id": "cfg-07",
+              "name": "scraper_url",
+              "value": "http://scraper-service:8001",
+              "type": "string"
+            },
+            {
+              "id": "cfg-08",
+              "name": "embedding_url",
+              "value": "https://openrouter.ai/api",
+              "type": "string"
+            },
+            {
+              "id": "cfg-09",
+              "name": "langs",
+              "value": "bg-orig,bg,en,en-GB",
+              "type": "string"
+            },
+            {
+              "id": "cfg-10",
+              "name": "openrouter_api_key",
+              "value": "REPLACE_WITH_YOUR_OPENROUTER_API_KEY",
+              "type": "string"
+            },
+            {
+              "id": "cfg-11",
+              "name": "embed_batch_size",
+              "value": 50,
+              "type": "number"
+            }
           ]
         },
         "options": {}
@@ -32,7 +90,10 @@
       "name": "Config",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
-      "position": [440, 300]
+      "position": [
+        440,
+        300
+      ]
     },
     {
       "parameters": {
@@ -42,7 +103,10 @@
       "name": "Ensure Collection",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [660, 300]
+      "position": [
+        660,
+        300
+      ]
     },
     {
       "parameters": {
@@ -51,10 +115,22 @@
         "sendQuery": true,
         "queryParameters": {
           "parameters": [
-            { "name": "part",       "value": "snippet" },
-            { "name": "playlistId", "value": "={{ $('Config').first().json.playlist_id }}" },
-            { "name": "maxResults", "value": "50" },
-            { "name": "key",        "value": "={{ $('Config').first().json.youtube_api_key }}" }
+            {
+              "name": "part",
+              "value": "snippet"
+            },
+            {
+              "name": "playlistId",
+              "value": "={{ $('Config').first().json.playlist_id }}"
+            },
+            {
+              "name": "maxResults",
+              "value": "50"
+            },
+            {
+              "name": "key",
+              "value": "={{ $('Config').first().json.youtube_api_key }}"
+            }
           ]
         },
         "options": {}
@@ -63,7 +139,10 @@
       "name": "Fetch Playlist Page 1",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1320, 300]
+      "position": [
+        1320,
+        300
+      ]
     },
     {
       "parameters": {
@@ -73,7 +152,10 @@
       "name": "Extract Video IDs",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1540, 300]
+      "position": [
+        1540,
+        300
+      ]
     },
     {
       "parameters": {
@@ -84,7 +166,10 @@
       "name": "Loop Videos",
       "type": "n8n-nodes-base.splitInBatches",
       "typeVersion": 3,
-      "position": [1760, 300]
+      "position": [
+        1760,
+        300
+      ]
     },
     {
       "parameters": {
@@ -94,18 +179,28 @@
       "name": "Check if Ingested",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1980, 300]
+      "position": [
+        1980,
+        300
+      ]
     },
     {
       "parameters": {
         "conditions": {
-          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
           "conditions": [
             {
               "id": "cond-02",
               "leftValue": "={{ $json.already_ingested }}",
               "rightValue": true,
-              "operator": { "type": "boolean", "operation": "equals" }
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
             }
           ],
           "combinator": "and"
@@ -116,7 +211,10 @@
       "name": "IF Already Ingested?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [2200, 300]
+      "position": [
+        2200,
+        300
+      ]
     },
     {
       "parameters": {
@@ -126,9 +224,18 @@
         "specifyBody": "keypair",
         "bodyParameters": {
           "parameters": [
-            { "name": "video_id",   "value": "={{ $('Loop Videos').first().json.video_id }}" },
-            { "name": "chunk_size", "value": "={{ $('Loop Videos').first().json.chunk_size }}" },
-            { "name": "langs",      "value": "={{ $('Config').first().json.langs.split(',') }}" }
+            {
+              "name": "video_id",
+              "value": "={{ $('Loop Videos').first().json.video_id }}"
+            },
+            {
+              "name": "chunk_size",
+              "value": "={{ $('Loop Videos').first().json.chunk_size }}"
+            },
+            {
+              "name": "langs",
+              "value": "={{ $('Config').first().json.langs.split(',') }}"
+            }
           ]
         },
         "options": {}
@@ -137,7 +244,10 @@
       "name": "Get Transcript",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [2420, 300],
+      "position": [
+        2420,
+        300
+      ],
       "continueOnFail": true
     },
     {
@@ -148,30 +258,181 @@
       "name": "Embed and Ingest Chunks",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [2640, 300]
+      "position": [
+        2900,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-has-transcript",
+              "leftValue": "={{ $json.chunks !== undefined && $json.chunks !== null }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b1a2c3d4-000b-4000-a000-000000000099",
+      "name": "Has Transcript?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2640,
+        300
+      ]
     }
   ],
   "connections": {
-    "Manual Trigger":          { "main": [[{ "node": "Config",                   "type": "main", "index": 0 }]] },
-    "Config":             { "main": [[{ "node": "Ensure Collection",    "type": "main", "index": 0 }]] },
-    "Ensure Collection":  { "main": [[{ "node": "Fetch Playlist Page 1", "type": "main", "index": 0 }]] },
-    "Fetch Playlist Page 1":   { "main": [[{ "node": "Extract Video IDs",        "type": "main", "index": 0 }]] },
-    "Extract Video IDs":       { "main": [[{ "node": "Loop Videos",              "type": "main", "index": 0 }]] },
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Ensure Collection",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ensure Collection": {
+      "main": [
+        [
+          {
+            "node": "Fetch Playlist Page 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Playlist Page 1": {
+      "main": [
+        [
+          {
+            "node": "Extract Video IDs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Video IDs": {
+      "main": [
+        [
+          {
+            "node": "Loop Videos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
     "Loop Videos": {
       "main": [
         [],
-        [{ "node": "Check if Ingested", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Check if Ingested",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
-    "Check if Ingested":       { "main": [[{ "node": "IF Already Ingested?",     "type": "main", "index": 0 }]] },
+    "Check if Ingested": {
+      "main": [
+        [
+          {
+            "node": "IF Already Ingested?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
     "IF Already Ingested?": {
       "main": [
-        [{ "node": "Loop Videos",      "type": "main", "index": 0 }],
-        [{ "node": "Get Transcript",   "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Loop Videos",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Get Transcript",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
-    "Get Transcript":          { "main": [[{ "node": "Embed and Ingest Chunks",  "type": "main", "index": 0 }]] },
-    "Embed and Ingest Chunks": { "main": [[{ "node": "Loop Videos",              "type": "main", "index": 0 }]] }
+    "Get Transcript": {
+      "main": [
+        [
+          {
+            "node": "Has Transcript?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embed and Ingest Chunks": {
+      "main": [
+        [
+          {
+            "node": "Loop Videos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Transcript?": {
+      "main": [
+        [
+          {
+            "node": "Embed and Ingest Chunks",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Loop Videos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
   },
   "active": false,
   "settings": {
@@ -179,5 +440,7 @@
     "saveManualExecutions": true,
     "saveExecutionProgress": true
   },
-  "meta": { "instanceId": "youtube-rag-n8n" }
+  "meta": {
+    "instanceId": "youtube-rag-n8n"
+  }
 }

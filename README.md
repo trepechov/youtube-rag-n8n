@@ -10,7 +10,7 @@ End-to-end system that scrapes YouTube playlists, builds a vector knowledge base
 
 - Docker + Docker Compose
 - [YouTube Data API v3 key](https://console.cloud.google.com/apis/credentials)
-- [OpenRouter API key](https://openrouter.ai/keys) — for both embeddings and chat LLM (free tier available)
+- [OpenRouter API key](https://openrouter.ai/keys) — free tier available; covers both embeddings and chat LLM
 
 ---
 
@@ -25,7 +25,7 @@ cd youtube-rag-n8n
 
 ```bash
 cp .env.example .env
-# Open .env and fill in YOUTUBE_API_KEY and OPENROUTER_API_KEY
+# Open .env and fill in OPENROUTER_API_KEY
 ```
 
 ### Step 3 — Start the app
