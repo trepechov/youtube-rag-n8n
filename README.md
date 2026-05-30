@@ -25,7 +25,10 @@ cd youtube-rag-n8n
 
 ```bash
 cp .env.example .env
-# Open .env and fill in OPENROUTER_API_KEY
+# Open .env and fill in:
+#   OPENROUTER_API_KEY  — your OpenRouter key
+#   QDRANT_COLLECTION   — a short slug for the podcast you're ingesting
+#                         e.g. lex-fridman-podcast, huberman-lab, my-show
 ```
 
 ### Step 3 — Start the app
@@ -43,7 +46,9 @@ docker compose up -d
 ### Step 4 — Ingest a YouTube playlist
 
 1. Open **http://localhost:5678** and import `n8n/workflows/youtube-rag-ingestion.json`
-2. Open the **Config** node and set your YouTube playlist ID
+2. Open the **Config** node and set:
+   - `playlist_id` — the YouTube playlist ID to ingest
+   - `collection` — the same slug you set in `QDRANT_COLLECTION` (e.g. `lex-fridman-podcast`)
 3. Click **Execute Workflow** and wait for it to finish
 
 ### Step 5 — Ask a question
@@ -51,7 +56,7 @@ docker compose up -d
 ```bash
 curl -X POST http://localhost:8000/chat \
   -H "Content-Type: application/json" \
-  -d '{"question": "What topics were discussed?", "collection": "podcasts"}'
+  -d '{"question": "What topics were discussed?", "collection": "lex-fridman-podcast"}'
 ```
 
 You should get back an answer with cited sources from your playlist.
@@ -66,7 +71,7 @@ You should get back an answer with cited sources from your playlist.
 <script
   src="http://localhost:8000/widget/chat-widget.js"
   data-api-url="http://localhost:8000"
-  data-collection="podcasts"
+  data-collection="lex-fridman-podcast"
   data-title="Ask the Podcast"
 ></script>
 ```
