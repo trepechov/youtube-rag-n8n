@@ -181,6 +181,35 @@ def health():
     return {"status": "ok"}
 
 
+@app.get("/stats")
+async def stats(collection: Optional[str] = None):
+    coll = collection or DEFAULT_COLLECTION
+    async with httpx.AsyncClient(timeout=10) as client:
+        info_resp = await client.get(f"{QDRANT_URL}/collections/{coll}")
+        if info_resp.status_code == 404:
+            raise HTTPException(status_code=404, detail=f"Collection '{coll}' not found — run ingestion first")
+        info_resp.raise_for_status()
+        info = info_resp.json()["result"]
+
+        # Count distinct videos: each video's first chunk has chunk_id == 0,
+        # so this filter gives one point per ingested video.
+        count_resp = await client.post(
+            f"{QDRANT_URL}/collections/{coll}/points/count",
+            json={"filter": {"must": [{"key": "chunk_id", "match": {"value": 0}}]}, "exact": True},
+        )
+        count_resp.raise_for_status()
+        video_count = count_resp.json()["result"]["count"]
+
+    total_chunks = info.get("points_count", 0)
+    return {
+        "collection": coll,
+        "status": info.get("status", "unknown"),
+        "total_videos": video_count,
+        "total_chunks": total_chunks,
+        "avg_chunks_per_video": round(total_chunks / video_count, 1) if video_count else 0,
+    }
+
+
 @app.get("/v1/models")
 async def list_models():
     async with httpx.AsyncClient(timeout=10) as client:

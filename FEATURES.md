@@ -225,4 +225,46 @@ Once `published_at` is in place, the chat API can detect explicit recency langua
 3. `GET /embed` in `chat-api/main.py` — iframe story
 4. `wordpress-plugin/youtube-rag-chat.php` — WordPress plugin
 
+## Collection Status Counter
+
+**Goal:** Expose a lightweight status endpoint that shows how many videos and chunks are currently stored in a collection, so the n8n dashboard (or any monitoring tool) can display ingestion progress at a glance.
+
+### How it works
+
+`GET /stats?collection=<name>` (collection defaults to `QDRANT_COLLECTION`) hits two Qdrant endpoints and returns a small summary JSON:
+
+```json
+{
+  "collection": "podcasts",
+  "status": "green",
+  "total_videos": 42,
+  "total_chunks": 1830,
+  "avg_chunks_per_video": 43.6
+}
+```
+
+- **`total_chunks`** — exact point count from Qdrant's collection info.
+- **`total_videos`** — count of points where `chunk_id == 0` (the first chunk of every ingested video). This is a reliable proxy for distinct video count as long as all ingestions complete successfully; partially-failed videos that produced no chunks will not appear.
+- **`status`** — Qdrant's own collection health (`green` / `yellow` / `red`).
+
+### How to wire it into n8n
+
+Add an **HTTP Request** node at the start (or end) of the ingestion workflow:
+
+- Method: `GET`
+- URL: `http://chat-api:8000/stats`
+- Output the result to a **Set** node or log it to the workflow execution data.
+
+This gives a before/after snapshot of the collection size without any additional infrastructure.
+
+### Reliability caveats
+
+- `total_videos` undercounts if a video was partially ingested (chunks uploaded but the run aborted before chunk 0 was written — unlikely but possible with out-of-order upserts).
+- Overcounts are not possible: a video that was re-ingested idempotently still has exactly one `chunk_id == 0` point.
+- The count reflects the live Qdrant state, not n8n workflow history — resets or collection drops are immediately visible.
+
+### Status
+
+Implemented: `GET /stats` is live in `chat-api/main.py`.
+
 <!-- Add new features below this line -->

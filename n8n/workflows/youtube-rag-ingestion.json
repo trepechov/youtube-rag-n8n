@@ -81,6 +81,12 @@
               "name": "embed_batch_size",
               "value": 50,
               "type": "number"
+            },
+            {
+              "id": "cfg-12",
+              "name": "chat_api_url",
+              "value": "http://chat-api:8000",
+              "type": "string"
             }
           ]
         },
@@ -265,6 +271,19 @@
     },
     {
       "parameters": {
+        "jsCode": "const config = $('Config').first().json;\nconst chatApiUrl = config.chat_api_url || 'http://chat-api:8000';\nconst collection = config.collection || 'podcasts';\n\nconst stats = await this.helpers.httpRequest({\n  method: 'GET',\n  url: `${chatApiUrl}/stats?collection=${collection}`,\n  json: true,\n});\n\nreturn [{ json: stats }];"
+      },
+      "id": "b1a2c3d4-0009-4000-a000-000000000009",
+      "name": "Fetch Final Stats",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        120
+      ]
+    },
+    {
+      "parameters": {
         "conditions": {
           "options": {
             "caseSensitive": true,
@@ -354,7 +373,13 @@
     },
     "Loop Videos": {
       "main": [
-        [],
+        [
+          {
+            "node": "Fetch Final Stats",
+            "type": "main",
+            "index": 0
+          }
+        ],
         [
           {
             "node": "Check if Ingested",
