@@ -94,6 +94,11 @@ services:
       OPENAI_API_BASE_URL: http://chat-api:8000/v1
       OPENAI_API_KEY: "local"
       WEBUI_AUTH: "False"
+      # Pre-select the default collection; switch via the model dropdown to query a different one.
+      # Each Qdrant collection is exposed as a model named rag:<collection>.
+      DEFAULT_MODELS: "rag:${QDRANT_COLLECTION:-podcasts}"
+    volumes:
+      - open_webui_data:/app/backend/data
     depends_on:
       - chat-api
     networks:
@@ -103,6 +108,7 @@ volumes:
   postgres_data:
   n8n_data:
   qdrant_data:
+  open_webui_data:
 
 networks:
   internal:
