@@ -28,10 +28,6 @@ services:
     restart: always
     ports: []  # Internal only in production
 
-  ollama:
-    restart: always
-    ports: []  # Internal only
-
   scraper-service:
     restart: always
     ports: []  # Internal only

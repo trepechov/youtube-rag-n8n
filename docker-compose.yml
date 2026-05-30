@@ -1,4 +1,7 @@
 services:
+  # ── Core services ────────────────────────────────────────────────────────────
+  # These run on every `docker compose up -d` and are required for the app.
+
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
@@ -80,6 +83,9 @@ services:
       - qdrant
     networks:
       - internal
+
+  # ── Dev tools ─────────────────────────────────────────────────────────────────
+  # Only start when you explicitly opt in:  docker compose --profile dev up -d
 
   open-webui:
     image: ghcr.io/open-webui/open-webui:main

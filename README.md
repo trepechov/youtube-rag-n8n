@@ -2,6 +2,92 @@
 
 End-to-end system that scrapes YouTube playlists, builds a vector knowledge base, and serves a chat interface for querying podcast content.
 
+---
+
+## Getting started
+
+### What you need before you begin
+
+- Docker + Docker Compose
+- [YouTube Data API v3 key](https://console.cloud.google.com/apis/credentials)
+- [OpenRouter API key](https://openrouter.ai/keys) — for both embeddings and chat LLM (free tier available)
+
+---
+
+### Step 1 — Clone the repo
+
+```bash
+git clone <repo-url>
+cd youtube-rag-n8n
+```
+
+### Step 2 — Add your API keys
+
+```bash
+cp .env.example .env
+# Open .env and fill in YOUTUBE_API_KEY and OPENROUTER_API_KEY
+```
+
+### Step 3 — Start the app
+
+```bash
+docker compose up -d
+```
+
+| Service | URL |
+|---------|-----|
+| n8n (ingestion UI) | http://localhost:5678 |
+| Chat API | http://localhost:8000 |
+| Qdrant dashboard | http://localhost:6333/dashboard |
+
+### Step 4 — Ingest a YouTube playlist
+
+1. Open **http://localhost:5678** and import `n8n/workflows/youtube-rag-ingestion.json`
+2. Open the **Config** node and set your YouTube playlist ID
+3. Click **Execute Workflow** and wait for it to finish
+
+### Step 5 — Ask a question
+
+```bash
+curl -X POST http://localhost:8000/chat \
+  -H "Content-Type: application/json" \
+  -d '{"question": "What topics were discussed?", "collection": "podcasts"}'
+```
+
+You should get back an answer with cited sources from your playlist.
+
+---
+
+## Next steps
+
+**Embed the widget on your website:**
+
+```html
+<script
+  src="http://localhost:8000/widget/chat-widget.js"
+  data-api-url="http://localhost:8000"
+  data-collection="podcasts"
+  data-title="Ask the Podcast"
+></script>
+```
+
+**Start the dev chat UI (Open WebUI):**
+
+```bash
+docker compose --profile dev up -d
+# Open WebUI available at http://localhost:3000
+```
+
+**Deploy to a VPS:**
+
+```bash
+docker compose -f docker-compose.prod.yml up -d
+```
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for full details on production setup, SSL, and security hardening.
+
+---
+
 ## Architecture at a glance
 
 ```
@@ -11,7 +97,7 @@ YouTube Playlist
   n8n Workflow  ──►  Scraper Service (yt-dlp)
       │
       ▼
-  Ollama Embeddings (local, free)
+  OpenRouter Embeddings (free, nvidia/llama-nemotron)
       │
       ▼
    Qdrant (vector DB)
@@ -25,87 +111,23 @@ YouTube Playlist
 
 ## Services
 
+### Core (always running)
+
 | Service | Local Port | Description |
 |---------|-----------|-------------|
-| n8n | 5678 | Workflow automation — runs ingestion pipeline |
+| n8n | 5678 | Workflow automation — runs the ingestion pipeline |
 | Qdrant | 6333 | Vector database |
-| Ollama | 11434 | Local embedding model server (nomic-embed-text) |
-| Scraper Service | 8001 | yt-dlp transcript extraction (internal) |
-| Chat API | 8000 | RAG query endpoint (public) |
-| nginx | 80 | Reverse proxy (production only) |
-| PostgreSQL | — | n8n database (internal) |
+| Scraper Service | 8001 | yt-dlp transcript extraction (internal only) |
+| Chat API | 8000 | RAG query endpoint + embeddable widget |
+| PostgreSQL | — | n8n database (internal only) |
 
-## Quick Start (local)
+### Dev tools (opt-in)
 
-### 1. Prerequisites
+Start with `docker compose --profile dev up -d`.
 
-- Docker + Docker Compose (4GB+ RAM recommended for Ollama)
-- YouTube Data API v3 key ([get one here](https://console.cloud.google.com/apis/credentials))
-- OpenRouter API key (for chat LLM — [free tier available](https://openrouter.ai/keys))
-
-### 2. Configure environment
-
-```bash
-cp .env.example .env
-# Edit .env and fill in your API keys
-```
-
-### 3. Start everything
-
-```bash
-docker compose up -d
-```
-
-### 4. Pull the embedding model (one-time setup)
-
-```bash
-docker compose exec ollama ollama pull nomic-embed-text
-```
-
-This downloads ~274MB and only needs to be done once — the model is persisted in a Docker volume.
-
-Services will be available at:
-- n8n: http://localhost:5678
-- Chat API: http://localhost:8000
-- Qdrant dashboard: http://localhost:6333/dashboard
-
-### 5. Run the ingestion workflow
-
-1. Open n8n at http://localhost:5678
-2. Import the workflow from `n8n/workflows/youtube-rag-ingestion.json`
-3. In the **Config** node, set your playlist ID (e.g. `PLxxxxxxxxxxxxxx`)
-4. No extra credentials needed — Ollama runs locally, YouTube API key is in `.env`
-5. Click **Execute Workflow**
-
-### 6. Test the chat API
-
-```bash
-curl -X POST http://localhost:8000/chat \
-  -H "Content-Type: application/json" \
-  -d '{"question": "What topics were discussed?", "collection": "podcasts"}'
-```
-
-### 7. Embed the chat widget
-
-Add to any website:
-
-```html
-<script
-  src="http://localhost:8000/widget/chat-widget.js"
-  data-api-url="http://localhost:8000"
-  data-collection="podcasts"
-  data-title="Ask the Podcast"
-></script>
-```
-
-## Production deployment (VPS)
-
-```bash
-# Copy project to VPS, then:
-docker compose -f docker-compose.prod.yml up -d
-```
-
-See [ARCHITECTURE.md](ARCHITECTURE.md) for full details on VPS setup, SSL, and security hardening.
+| Service | Local Port | Description |
+|---------|-----------|-------------|
+| Open WebUI | 3000 | Chat UI for testing the OpenAI-compatible `/v1` API |
 
 ## Workflow: how ingestion works
 
@@ -116,7 +138,7 @@ n8n Trigger
   └─► [loop per video]
         └─► Scraper Service: download transcript via yt-dlp
         └─► [loop per chunk]
-              └─► OpenAI: generate embedding (text-embedding-3-small)
+              └─► OpenRouter: generate embedding (nvidia/llama-nemotron, free)
               └─► Qdrant: upsert vector + payload
 ```
 

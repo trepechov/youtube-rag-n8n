@@ -68,10 +68,10 @@
    Body: { "video_id": "...", "chunk_size": 600 }
    → Returns: { "video_id", "title", "channel", "url", "chunks": [{chunk_id, text}] }
 7. Code node: explode chunks array into individual items
-8. HTTP Request → OpenAI Embeddings API
-   POST https://api.openai.com/v1/embeddings
-   Body: { "model": "text-embedding-3-small", "input": "<chunk text>" }
-   → Returns: { "data": [{ "embedding": [1536 floats] }] }
+8. HTTP Request → OpenRouter Embeddings API
+   POST https://openrouter.ai/api/v1/embeddings
+   Body: { "model": "nvidia/llama-nemotron-embed-vl-1b-v2:free", "input": "<chunk text>" }
+   → Returns: { "data": [{ "embedding": [2048 floats] }] }
 9. Code node: build Qdrant upsert payload
    { "points": [{ "id": <uuid>, "vector": [...], "payload": {...} }] }
 10. HTTP Request → Qdrant
@@ -144,25 +144,18 @@ Per-request override: pass `"model": "..."` in the `/chat` request body.
 
 ## Embeddings
 
-**Provider**: Ollama (local Docker service) — no API key, no cost.
-**Model**: `nomic-embed-text` — 768 dimensions, fast on CPU.
-**Endpoint**: `POST http://ollama:11434/v1/embeddings` (OpenAI-compatible format)
+**Provider**: OpenRouter — same API key as the chat LLM, no extra cost.
+**Model**: `nvidia/llama-nemotron-embed-vl-1b-v2:free` — 2048 dimensions, free tier.
+**Endpoint**: `POST https://openrouter.ai/api/v1/embeddings` (OpenAI-compatible format)
 
-The Ollama service shares the same Docker network. The model must be pulled once after first start:
+Both n8n (during ingestion) and chat-api (at query time) call OpenRouter using `OPENROUTER_API_KEY` from `.env`. No separate key needed.
 
-```bash
-docker compose exec ollama ollama pull nomic-embed-text
-```
+**Switching embedding models**: Change `EMBEDDING_MODEL` in `.env`. If you switch, you MUST recreate the Qdrant collection and re-ingest everything — vectors from different models are incompatible.
 
-**Why not OpenRouter for embeddings?** OpenRouter only supports chat completions — it has no embeddings API. Ollama gives us a local, free, consistent alternative.
-
-**Switching embedding models**: Change `EMBEDDING_MODEL` in `.env`. If you switch, you MUST recreate the Qdrant collection and re-ingest (vectors from different models are incompatible).
-
-| Model | Dimensions | Notes |
-|-------|-----------|-------|
-| `nomic-embed-text` | 768 | Default, fast CPU |
-| `mxbai-embed-large` | 1024 | Higher quality, more RAM |
-| `all-minilm` | 384 | Very lightweight |
+| Model | Dimensions | Cost | Notes |
+|-------|-----------|------|-------|
+| `nvidia/llama-nemotron-embed-vl-1b-v2:free` | 2048 | Free | Default |
+| `text-embedding-3-small` (OpenAI direct) | 1536 | Paid | Higher throughput, paid |
 
 ## Production deployment
 
@@ -170,7 +163,7 @@ docker compose exec ollama ollama pull nomic-embed-text
 - VPS with Docker + Docker Compose
 - Domain name pointed at VPS
 - Ports 80 and 443 open
-- At least 4GB RAM (Ollama needs ~2GB for nomic-embed-text)
+- At least 2GB RAM
 
 ### Recommended setup
 
