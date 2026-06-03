@@ -115,53 +115,17 @@
       ]
     },
     {
-      "parameters": {
-        "method": "GET",
-        "url": "=https://www.googleapis.com/youtube/v3/playlistItems",
-        "sendQuery": true,
-        "queryParameters": {
-          "parameters": [
-            {
-              "name": "part",
-              "value": "snippet"
-            },
-            {
-              "name": "playlistId",
-              "value": "={{ $('Config').first().json.playlist_id }}"
-            },
-            {
-              "name": "maxResults",
-              "value": "50"
-            },
-            {
-              "name": "key",
-              "value": "={{ $('Config').first().json.youtube_api_key }}"
-            }
-          ]
-        },
-        "options": {}
-      },
       "id": "b1a2c3d4-0004-4000-a000-000000000004",
-      "name": "Fetch Playlist Page 1",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        1320,
-        300
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "const items = $input.first().json.items || [];\nconst config = $('Config').first().json;\n\nreturn items\n  .filter(item => item.snippet?.resourceId?.videoId)\n  .map(item => ({\n    json: {\n      video_id:     item.snippet.resourceId.videoId,\n      published_at: item.snippet.publishedAt || null,\n      collection:   config.collection,\n      chunk_size: config.chunk_size,\n      embedding_model: config.embedding_model\n    }\n  }));"
-      },
-      "id": "b1a2c3d4-0005-4000-a000-000000000005",
-      "name": "Extract Video IDs",
+      "name": "Fetch All Videos",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1540,
+        1100,
         300
-      ]
+      ],
+      "parameters": {
+        "jsCode": "const config = $('Config').first().json;\nconst baseUrl = 'https://www.googleapis.com/youtube/v3/playlistItems';\nconst allVideos = [];\nlet pageToken = null;\n\ndo {\n  let url = baseUrl\n    + '?part=snippet'\n    + '&playlistId=' + encodeURIComponent(config.playlist_id)\n    + '&maxResults=50'\n    + '&key=' + encodeURIComponent(config.youtube_api_key);\n  if (pageToken) url += '&pageToken=' + encodeURIComponent(pageToken);\n\n  const resp = await this.helpers.httpRequest({\n    method: 'GET',\n    url,\n    json: true,\n  });\n\n  for (const item of (resp.items || [])) {\n    const videoId = item.snippet && item.snippet.resourceId && item.snippet.resourceId.videoId;\n    if (videoId) {\n      allVideos.push({\n        video_id:        videoId,\n        published_at:    (item.snippet.publishedAt || null),\n        collection:      config.collection,\n        chunk_size:      config.chunk_size,\n        embedding_model: config.embedding_model,\n      });\n    }\n  }\n\n  pageToken = resp.nextPageToken || null;\n} while (pageToken);\n\nreturn allVideos.map(v => ({ json: v }));"
+      }
     },
     {
       "parameters": {
@@ -342,29 +306,7 @@
       "main": [
         [
           {
-            "node": "Fetch Playlist Page 1",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Fetch Playlist Page 1": {
-      "main": [
-        [
-          {
-            "node": "Extract Video IDs",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Extract Video IDs": {
-      "main": [
-        [
-          {
-            "node": "Loop Videos",
+            "node": "Fetch All Videos",
             "type": "main",
             "index": 0
           }
@@ -449,6 +391,17 @@
             "index": 0
           }
         ],
+        [
+          {
+            "node": "Loop Videos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch All Videos": {
+      "main": [
         [
           {
             "node": "Loop Videos",
