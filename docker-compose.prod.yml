@@ -55,6 +55,7 @@ services:
       - chat-api
     networks:
       - internal
+      - web
 
   nginx:
     image: nginx:alpine
