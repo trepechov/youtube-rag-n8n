@@ -67,7 +67,7 @@
             {
               "id": "cfg-09",
               "name": "langs",
-              "value": "bg-orig,bg,en,en-GB",
+              "value": "bg,en,en-GB",
               "type": "string"
             },
             {
@@ -151,7 +151,7 @@
         300
       ],
       "parameters": {
-        "jsCode": "const loopItem = $('Loop Playlists').first().json;\nconst playlistId = loopItem.playlist_id;\nconst playlistName = loopItem.playlist_name;\nconst config = $('Config').first().json;\nconst baseUrl = 'https://www.googleapis.com/youtube/v3/playlistItems';\nconst allVideos = [];\nlet pageToken = null;\n\ndo {\n  let url = baseUrl\n    + '?part=snippet'\n    + '&playlistId=' + encodeURIComponent(playlistId)\n    + '&maxResults=50'\n    + '&key=' + encodeURIComponent(config.youtube_api_key);\n  if (pageToken) url += '&pageToken=' + encodeURIComponent(pageToken);\n\n  const resp = await this.helpers.httpRequest({\n    method: 'GET',\n    url,\n    json: true,\n  });\n\n  for (const item of (resp.items || [])) {\n    const videoId = item.snippet && item.snippet.resourceId && item.snippet.resourceId.videoId;\n    if (videoId) {\n      allVideos.push({\n        video_id:        videoId,\n        playlist_id:     playlistId,\n        published_at:    (item.snippet.publishedAt || null),\n        collection:      config.collection,\n        chunk_size:      config.chunk_size,\n        embedding_model: config.embedding_model,\n        playlist_name: playlistName,\n      });\n    }\n  }\n\n  pageToken = resp.nextPageToken || null;\n} while (pageToken);\n\nreturn allVideos.map(v => ({ json: v }));"
+        "jsCode": "const loopItem = $('Loop Playlists').first().json;\nconst playlistId = loopItem.playlist_id;\nconst playlistName = loopItem.playlist_name;\nconst config = $('Config').first().json;\nconst baseUrl = 'https://www.googleapis.com/youtube/v3/playlistItems';\nconst allVideos = [];\nlet pageToken = null;\n\ndo {\n  let url = baseUrl\n    + '?part=snippet'\n    + '&playlistId=' + encodeURIComponent(playlistId)\n    + '&maxResults=50'\n    + '&key=' + encodeURIComponent(config.youtube_api_key);\n  if (pageToken) url += '&pageToken=' + encodeURIComponent(pageToken);\n\n  const resp = await this.helpers.httpRequest({\n    method: 'GET',\n    url,\n    json: true,\n  });\n\n  for (const item of (resp.items || [])) {\n    const videoId = item.snippet && item.snippet.resourceId && item.snippet.resourceId.videoId;\n    if (videoId) {\n      allVideos.push({\n        video_id:        videoId,\n        title:           (item.snippet.title || 'Unknown Title'),\n        channel:         (item.snippet.videoOwnerChannelTitle || item.snippet.channelTitle || 'Unknown Channel'),\n        playlist_id:     playlistId,\n        published_at:    (item.snippet.publishedAt || null),\n        collection:      config.collection,\n        chunk_size:      config.chunk_size,\n        embedding_model: config.embedding_model,\n        playlist_name:   playlistName,\n      });\n    }\n  }\n\n  pageToken = resp.nextPageToken || null;\n} while (pageToken);\n\nreturn allVideos.map(v => ({ json: v }));"
       }
     },
     {
@@ -232,6 +232,14 @@
             {
               "name": "langs",
               "value": "={{ $('Config').first().json.langs.split(',') }}"
+            },
+            {
+              "name": "title",
+              "value": "={{ $('Loop Videos').first().json.title }}"
+            },
+            {
+              "name": "channel",
+              "value": "={{ $('Loop Videos').first().json.channel }}"
             }
           ]
         },

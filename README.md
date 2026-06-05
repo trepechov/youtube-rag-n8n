@@ -116,7 +116,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for full details on production setup, SSL
 YouTube Playlist
       │
       ▼
-  n8n Workflow  ──►  Scraper Service (yt-dlp)
+  n8n Workflow  ──►  Scraper Service (youtube-transcript-api)
       │
       ▼
   OpenRouter Embeddings (free, nvidia/llama-nemotron)
@@ -139,7 +139,7 @@ YouTube Playlist
 |---------|-----------|-------------|
 | n8n | 5678 | Workflow automation — runs the ingestion pipeline |
 | Qdrant | 6333 | Vector database |
-| Scraper Service | 8001 | yt-dlp transcript extraction (internal only) |
+| Scraper Service | 8001 | youtube-transcript-api extraction (internal only) |
 | Chat API | 8000 | RAG query endpoint + embeddable widget |
 | PostgreSQL | — | n8n database (internal only) |
 

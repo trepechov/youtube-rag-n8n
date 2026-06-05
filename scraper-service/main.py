@@ -1,21 +1,27 @@
 import os
 import re
-import subprocess
-import json
-import tempfile
-from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
+from youtube_transcript_api import (
+    YouTubeTranscriptApi,
+    NoTranscriptFound,
+    TranscriptsDisabled,
+    VideoUnavailable,
+    CouldNotRetrieveTranscript,
+)
+from youtube_transcript_api.proxies import GenericProxyConfig
 
-app = FastAPI(title="YouTube Scraper Service", version="1.0.0")
+app = FastAPI(title="YouTube Scraper Service", version="2.0.0")
 
 
 class TranscriptRequest(BaseModel):
     video_id: str
     chunk_size: int = 600
-    langs: list[str] = ["bg-orig", "bg", "en", "en-GB"]
+    langs: list[str] = ["bg", "en", "en-GB"]
+    title: str = "Unknown Title"
+    channel: str = "Unknown Channel"
 
 
 class Chunk(BaseModel):
@@ -33,153 +39,103 @@ class TranscriptResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# yt-dlp transcript extraction
+# youtube-transcript-api client (singleton, proxy-aware)
 # ---------------------------------------------------------------------------
 
-def _download_transcript(video_id: str, langs: list[str]) -> dict:
-    url = f"https://www.youtube.com/watch?v={video_id}"
-    cookies = os.environ.get("COOKIES_FILE", "")
-
-    base_cmd = ["yt-dlp", "--no-warnings"]
-    if cookies and Path(cookies).exists():
-        base_cmd += ["--cookies", cookies]
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        # Step 1: metadata only (--print conflicts with --write-subs in newer yt-dlp)
-        meta_result = subprocess.run(
-            base_cmd + ["--dump-single-json", "--skip-download", url],
-            capture_output=True, text=True, timeout=60,
-        )
-        metadata: dict = {}
-        if meta_result.returncode == 0 and meta_result.stdout.strip():
-            try:
-                m = json.loads(meta_result.stdout.strip())
-                metadata = {
-                    "id": m.get("id", video_id),
-                    "title": m.get("title", "Unknown Title"),
-                    "channel": m.get("channel") or m.get("uploader", "Unknown Channel"),
-                }
-            except json.JSONDecodeError:
-                pass
-        if not metadata:
-            metadata = {"id": video_id, "title": "Unknown Title", "channel": "Unknown Channel"}
-
-        # Fast-fail before attempting download: yt-dlp metadata already contains
-        # which subtitle tracks exist. Avoids two 180s download attempts on captionless videos.
-        if meta_result.returncode == 0 and meta_result.stdout.strip():
-            try:
-                m = json.loads(meta_result.stdout.strip())
-                has_auto = bool(m.get("automatic_captions"))
-                has_manual = bool(m.get("subtitles"))
-                if not has_auto and not has_manual:
-                    raise RuntimeError("No subtitles found — video has no captions")
-            except json.JSONDecodeError:
-                pass
-
-        # Step 2: download subtitles (no --print here)
-        sub_result = subprocess.run(
-            base_cmd + [
-                "--skip-download",
-                "--write-subs",
-                "--write-auto-subs",
-                "--sub-langs", ",".join(langs),
-                "--sub-format", "vtt",
-                "--output", f"{tmpdir}/%(id)s",
-                url,
-            ],
-            capture_output=True, text=True, timeout=180,
-        )
-
-        # Don't check returncode — yt-dlp may return non-zero if one lang gets
-        # rate-limited while others succeeded. Check for files instead.
-        vtt_files = sorted(Path(tmpdir).glob("*.vtt"))
-
-        # Fallback: if specified langs yielded nothing, grab whatever auto-subs exist.
-        # Covers videos where auto-generated captions use an unexpected language code.
-        if not vtt_files:
-            subprocess.run(
-                base_cmd + [
-                    "--skip-download",
-                    "--write-auto-subs",
-                    "--sub-langs", "all",
-                    "--sub-format", "vtt",
-                    "--output", f"{tmpdir}/%(id)s",
-                    url,
-                ],
-                capture_output=True, text=True, timeout=180,
+def _build_api() -> YouTubeTranscriptApi:
+    http_proxy  = os.environ.get("HTTP_PROXY_URL", "").strip()
+    https_proxy = os.environ.get("HTTPS_PROXY_URL", "").strip() or http_proxy
+    if http_proxy or https_proxy:
+        return YouTubeTranscriptApi(
+            proxy_config=GenericProxyConfig(
+                http_url=http_proxy or https_proxy,
+                https_url=https_proxy or http_proxy,
             )
-            vtt_files = sorted(Path(tmpdir).glob("*.vtt"))
-
-        if not vtt_files:
-            raise RuntimeError("No subtitles found — video may have no captions")
-
-        segments = _parse_vtt(vtt_files[0].read_text(encoding="utf-8"))
-
-        return {
-            "id": metadata["id"],
-            "title": metadata["title"],
-            "channel": metadata["channel"],
-            "segments": segments,
-        }
-
-
-def _parse_vtt(content: str) -> list[tuple[int, str]]:
-    """Parse VTT into (start_seconds, text) segments, deduplicating rolling-window cues."""
-    segments: list[tuple[int, str]] = []
-    seen: set[str] = set()
-    current_start: int = 0
-    in_cue = False
-
-    for raw in content.splitlines():
-        line = raw.strip()
-
-        if not line:
-            in_cue = False
-            continue
-
-        if "-->" in line:
-            start_str = line.split("-->")[0].strip()
-            try:
-                parts = start_str.split(":")
-                if len(parts) == 3:
-                    h, m, s = parts
-                    current_start = int(h) * 3600 + int(m) * 60 + int(float(s.replace(",", ".")))
-                elif len(parts) == 2:
-                    m, s = parts
-                    current_start = int(m) * 60 + int(float(s.replace(",", ".")))
-            except (ValueError, IndexError):
-                pass
-            in_cue = True
-            continue
-
-        if (
-            line.startswith("WEBVTT")
-            or line.startswith("NOTE")
-            or re.match(r"^[0-9]+$", line)
-            or re.match(r"^\d{2}:\d{2}", line)
-        ):
-            continue
-
-        if not in_cue:
-            continue
-
-        clean = re.sub(r"<[^>]+>", "", line)
-        clean = (
-            clean.replace("&amp;", "&")
-                 .replace("&lt;", "<")
-                 .replace("&gt;", ">")
-                 .replace("&nbsp;", " ")
-                 .strip()
         )
-        if clean and clean not in seen:
-            seen.add(clean)
-            segments.append((current_start, clean))
+    return YouTubeTranscriptApi()
 
-    return segments
+_yt_api = _build_api()
 
+
+# ---------------------------------------------------------------------------
+# Transcript extraction
+# ---------------------------------------------------------------------------
+
+def _download_transcript(
+    video_id: str, langs: list[str], title: str, channel: str
+) -> dict:
+    try:
+        transcript_list = _yt_api.list(video_id)
+    except TranscriptsDisabled:
+        raise RuntimeError("No subtitles found — captions are disabled for this video")
+    except VideoUnavailable:
+        raise RuntimeError("Video not accessible: VideoUnavailable")
+    except CouldNotRetrieveTranscript as exc:
+        # IpBlocked / RequestBlocked / AgeRestricted are subclasses — catch all here
+        # and surface a clear message so operators know to configure a proxy.
+        msg = str(exc)
+        if "blocked" in msg.lower() or "ip" in msg.lower():
+            raise RuntimeError(
+                f"YouTube blocked this request. "
+                "Set HTTP_PROXY_URL / HTTPS_PROXY_URL on scraper-service "
+                "to route via a residential proxy."
+            )
+        raise RuntimeError(f"Could not retrieve transcript list: {exc}")
+
+    transcript = None
+
+    # 1) Manually-uploaded transcript in any requested language.
+    try:
+        transcript = transcript_list.find_manually_created_transcript(langs)
+    except NoTranscriptFound:
+        pass
+
+    # 2) Auto-generated transcript in any requested language.
+    if transcript is None:
+        try:
+            transcript = transcript_list.find_generated_transcript(langs)
+        except NoTranscriptFound:
+            pass
+
+    # 3) Translate any available transcript into the first requested language.
+    if transcript is None and langs:
+        for candidate in transcript_list:
+            if candidate.is_translatable and any(
+                t["language_code"] == langs[0] for t in candidate.translation_languages
+            ):
+                transcript = candidate.translate(langs[0])
+                break
+
+    # 4) Last resort: take the first transcript YouTube offers.
+    if transcript is None:
+        for candidate in transcript_list:
+            transcript = candidate
+            break
+
+    if transcript is None:
+        raise RuntimeError("No subtitles found — video has no captions in any language")
+
+    try:
+        fetched = transcript.fetch()
+    except CouldNotRetrieveTranscript as exc:
+        raise RuntimeError(f"Could not fetch transcript: {exc}")
+
+    # 1.x returns FetchedTranscriptSnippet objects with .start/.text attributes.
+    segments = [(int(snippet.start), snippet.text) for snippet in fetched]
+
+    return {
+        "id": video_id,
+        "title": title,
+        "channel": channel,
+        "segments": segments,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Chunking
+# ---------------------------------------------------------------------------
 
 def _chunk_segments(segments: list[tuple[int, str]], chunk_size: int) -> list[Chunk]:
-    """Chunk (start_seconds, text) segments into Chunk objects, recording each chunk's start time."""
     chunks: list[Chunk] = []
     current_text = ""
     current_start: int = 0
@@ -223,7 +179,7 @@ def health():
 @app.post("/transcript", response_model=TranscriptResponse)
 def get_transcript(req: TranscriptRequest):
     try:
-        data = _download_transcript(req.video_id, req.langs)
+        data = _download_transcript(req.video_id, req.langs, req.title, req.channel)
     except RuntimeError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     except Exception as exc:
