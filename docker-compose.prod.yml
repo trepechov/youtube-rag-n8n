@@ -71,7 +71,6 @@ services:
     depends_on:
       - chat-api
       - n8n
-      - open-webui
     networks:
       - web
 
