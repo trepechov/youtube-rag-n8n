@@ -17,6 +17,7 @@ services:
     ports: []  # Remove direct exposure — nginx proxies /n8n/
     environment:
       WEBHOOK_URL: https://${DOMAIN}/n8n/
+      N8N_PATH: /n8n/
       N8N_BASIC_AUTH_ACTIVE: "true"
       N8N_BASIC_AUTH_USER: ${N8N_BASIC_AUTH_USER}
       N8N_BASIC_AUTH_PASSWORD: ${N8N_BASIC_AUTH_PASSWORD}
