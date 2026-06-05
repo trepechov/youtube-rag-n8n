@@ -47,8 +47,16 @@ docker compose up -d
 
 1. Open **http://localhost:5678** and import `n8n/workflows/youtube-rag-ingestion.json`
 2. Open the **Config** node and set:
-   - `playlist_id` — the YouTube playlist ID to ingest
+   - `playlist_ids` — one or more playlists to ingest, as `id:name` pairs (comma-separated for multiple):
+     - Single playlist: `PLrAXtmErZgOfMuxkptxDyMcFpl2tMkhuw:My Show`
+     - Multiple playlists: `PL111:My Course,PL222:Interview Prep`
+     - Bare ID (no name) still works: `PLrAXtmErZgOfMuxkptxDyMcFpl2tMkhuw`
    - `collection` — the same slug you set in `QDRANT_COLLECTION` (e.g. `lex-fridman-podcast`)
+
+   Each chunk stored in Qdrant carries a `playlist_name` payload field, which you can filter on:
+   ```json
+   { "must": [{ "key": "playlist_name", "match": { "value": "My Course" } }] }
+   ```
 3. Click **Execute Workflow** and wait for it to finish
 
 ### Step 5 — Ask a question
