@@ -4,97 +4,108 @@ Planned features and improvements for the YouTube RAG system.
 
 ---
 
-## Multi-Playlist Support
+## Beta v0.1 — Shipped (June 2026)
 
-**Goal:** Scope video ingestion and retrieval to individual playlists, while still supporting cross-playlist search for general questions.
+- Multi-playlist ingestion with full pagination and idempotent re-runs
+- Source attribution (`start_time`, `published_at`) in scraper, n8n, and chat API
+- OpenAI-compatible `POST /v1/chat/completions` endpoint + Open WebUI integration
+- Collection status counter (`GET /stats`)
+- Demo password protection via nginx basic auth
 
-### How it works
+---
 
-- Each video stored in Qdrant gets a `playlist_id` metadata field attached at scrape time.
-- The scraper accepts a playlist identifier (YouTube playlist ID or a user-defined slug) as input.
-- The chat API detects whether the user's question targets a specific playlist (e.g. the widget is embedded on a playlist-specific page, or the user names a playlist) and filters Qdrant results by `playlist_id`.
-- If no playlist context is detected, the query runs against the full collection (all playlists).
+## ~~Multi-Playlist Ingestion~~ ✓ Completed
 
-### Changes needed
+> Implemented in `n8n/workflows/youtube-rag-ingestion.json` (feat/multi-playlist branch).
+> Retrieval filtering (chat API + widget) tracked as a follow-up below.
 
-**Scraper service**
-- Accept `playlist_id` / `playlist_slug` as a parameter alongside the playlist URL.
-- Tag every chunk upserted to Qdrant with `{ playlist_id: "<id>", playlist_slug: "<slug>" }` in the payload.
-
-**n8n workflow**
-- Pass `playlist_id` when triggering the scraper.
-- Store a playlist registry (id → name/URL mapping) somewhere queryable (Postgres table, or a JSON config file).
-
-**Chat API**
-- Accept an optional `playlist_id` in the `/chat` request body.
-- When `playlist_id` is present, add a Qdrant filter `{ must: [{ key: "playlist_id", match: { value: "<id>" } }] }` to the search call.
-- When absent, run the search with no filter.
-
-**Widget**
-- Accept a `playlistId` prop so page owners can scope the embedded chat to a specific playlist.
-- Pass it through to the `/chat` API call.
-
-### Open questions
-
-- How should the system handle videos that belong to multiple playlists? Duplicate chunks with different tags, or a `playlist_ids` array field with Qdrant's `any` filter?
-- Should there be a playlist-selection UI inside the widget, or is the playlist always determined by the embedding page?
+**What shipped:**
+- n8n Config node accepts a comma-separated `playlist_ids` field (`id:name` pairs or bare IDs).
+- A "Loop Playlists" node iterates over each playlist; "Fetch All Videos" paginates through all pages.
+- Every chunk stored in Qdrant carries a `playlist_name` payload field.
 
 ---
 
 ## ~~Idempotent Re-runs / Skip Already-Processed Videos~~ ✓ Completed
 
-> Implemented in `n8n/workflows/youtube-rag-ingestion.json`. See `docs/idempotent-reruns.md` for full spec.
+> Implemented in `n8n/workflows/youtube-rag-ingestion.json`.
 
-**Goal:** When the ingestion workflow runs again (e.g. to pick up new videos added to a playlist), skip videos that are already in Qdrant instead of re-downloading, re-embedding, and overwriting them.
-
-### Current behaviour
-
-The workflow re-processes every video in the playlist on every run. Qdrant's `PUT /points` upsert with deterministic IDs (`videoId_chunkId`) means data is not corrupted, but every re-run wastes embedding API quota and scraper time proportional to the full playlist size.
-
-### Approach
-
-Before calling the scraper for a video, check whether any Qdrant point with `video_id == <id>` already exists (a single scroll/filter request with `limit: 1` is enough). If it does, skip that video entirely.
-
-**n8n workflow changes**
-- After "Extract Video IDs", add a "Check if already ingested" HTTP node that queries Qdrant's scroll endpoint with a filter on `video_id`.
-- Add an IF node: if points exist → skip; if not → proceed to scraper.
-
-**Benefit for multi-playlist support**
-- A video that appears in two playlists will only be scraped once. The second pass just updates the `playlist_ids` field (or skips entirely if the multi-playlist tagging strategy uses separate points).
-
-### Open questions
-
-- On a re-run, should new chunks added due to a re-upload or transcript correction be detected, or is "video seen = skip always" acceptable?
+**What shipped:**
+- Before calling the scraper, the workflow queries Qdrant for any existing point with `video_id == <id>` (scroll with `limit: 1`).
+- Videos already in Qdrant are skipped entirely, saving embedding quota and scraper time.
 
 ---
 
-## YouTube Playlist Pagination
+## ~~YouTube Playlist Pagination~~ ✓ Completed
 
-**Goal:** Ingest all videos in a playlist, not just the first 50 (the YouTube API page limit).
+> Implemented in `n8n/workflows/youtube-rag-ingestion.json` ("Fetch All Videos" node).
 
-### Current limitation
+**What shipped:**
+- The "Fetch All Videos" Code node loops through `nextPageToken` until exhausted, collecting all videos before the per-video processing loop.
+- No 50-video cap. Works for back-catalogue scrapes of any playlist size.
 
-The "Fetch Playlist Page 1" node calls the YouTube `playlistItems` API once with `maxResults=50`. The response includes a `nextPageToken` when more pages exist, but the workflow ignores it. Playlists with more than 50 videos are silently truncated.
+---
 
-### Interaction with idempotent re-runs
+## ~~Collection Status Counter~~ ✓ Completed
 
-Once the "skip already-processed videos" feature is in place and the workflow runs on a schedule:
+> Implemented in `chat-api/main.py`.
 
-- YouTube returns items **newest first**, so new uploads always appear on page 1.
-- A scheduled run only needs to check page 1 for new content — pagination is not needed for ongoing operation.
-- Pagination is only critical for the **initial back-catalogue scrape** of a large playlist.
+**What shipped:**
+- `GET /stats?collection=<name>` returns `total_videos`, `total_chunks`, `avg_chunks_per_video`, and Qdrant collection health (`status`).
+- `total_videos` is derived from points where `chunk_id == 0` — a reliable proxy that never overcounts.
 
-> Note: Running the workflow multiple times without a pagination loop does **not** help — you get the same first 50 videos each run, not the next page. A `nextPageToken` must be explicitly passed to reach deeper pages.
+---
 
-### Approach options
+## ~~Source Attribution — Backend~~ ✓ Completed
 
-**Option A — Full pagination loop (n8n)**
-Add a loop after "Fetch Playlist Page 1": if the response contains `nextPageToken`, fetch the next page and continue until `nextPageToken` is absent. Merges all pages before the video loop.
+> Implemented in `scraper-service/main.py`, `n8n/workflows/youtube-rag-ingestion.json`, and `chat-api/main.py`.
 
-**Option B — One-time init mode**
-Add a boolean `full_scan` flag to the Config node. When `true`, follow all pages (used once per new playlist). When `false` (scheduled runs), fetch only page 1 for new videos.
+**What shipped:**
+- **Scraper:** `_parse_vtt()` preserves per-cue start timestamps; `_chunk_transcript()` attaches `start_time` (seconds) to each `Chunk`.
+- **n8n workflow:** maps `snippet.publishedAt` → `published_at` per video and includes both `start_time` and `published_at` in the Qdrant point payload.
+- **Chat API:** `Source` model includes `start_time`, `published_at`, and `timestamp_url` (`url + "&t=" + start_time`). Sources are sorted newest-first by `published_at`.
 
-Option B avoids building a complex loop and keeps scheduled runs fast. Recommended given that idempotent re-runs are also planned.
+**Remaining (widget layer — see below):** deeplink rendering and staleness badge.
+
+---
+
+## ~~OpenAI-Compatible Endpoint~~ ✓ Completed
+
+> Implemented in `chat-api/main.py` and `docker-compose.yml`.
+
+**What shipped:**
+- `POST /v1/chat/completions` accepts standard OpenAI messages; routes collection via the `model` field (`rag:<collection-slug>`); returns an OpenAI-shaped response.
+- Open WebUI dev service in `docker-compose.yml` (`--profile dev`); points `OPENAI_API_BASE_URL` at the chat-api.
+
+**Remaining (embed + WordPress — see below):** `GET /embed` iframe page and WordPress shortcode plugin.
+
+---
+
+## ~~Demo Password Protection~~ ✓ Completed
+
+> Implemented in `nginx/nginx.conf` and `docker-compose.prod.yml`.
+
+**What shipped:**
+- nginx basic auth (`auth_basic`) gates both Open WebUI (`/`) and n8n (`/n8n/`); `/api/` stays public for embedded widgets.
+- Open WebUI added to prod compose (internal network, nginx-proxied, no direct port exposure).
+- `nginx/.htpasswd` is gitignored; generated locally with one `openssl` command.
+
+---
+
+## Playlist-Scoped Chat
+
+**Goal:** Let the chat API filter Qdrant results to a specific playlist so an embedded widget can answer questions about one playlist without surfacing content from others.
+
+### Changes needed
+
+**Chat API**
+- Accept an optional `playlist_name` (or `playlist_id`) in the `/chat` and `/v1/chat/completions` request body.
+- When present, add a Qdrant filter `{ must: [{ key: "playlist_name", match: { value: "<name>" } }] }` to the search call.
+- When absent, run the search with no filter (full collection).
+
+**Widget**
+- Accept a `data-playlist` attribute so page owners can scope the embedded chat to a specific playlist.
+- Pass it through to the `/chat` API call.
 
 ---
 
@@ -107,164 +118,44 @@ Option B avoids building a complex loop and keeps scheduled runs fast. Recommend
 Replace (or supplement) the Manual Trigger node with an n8n Schedule Trigger set to run every 30–60 minutes. On each run:
 
 1. Fetch page 1 of the playlist (newest videos first — YouTube default).
-2. For each video, check if it already exists in Qdrant (the idempotent check from the "Skip Already-Processed Videos" feature).
+2. For each video, check if it already exists in Qdrant (idempotent re-run check).
 3. If it exists → skip. If not → scrape, embed, and ingest.
 
-Because new uploads always appear at the top of the playlist, a single-page fetch is sufficient for scheduled runs — no pagination needed.
-
-### Dependency on other features
-
-This feature only works efficiently once **idempotent re-runs** are implemented. Without the skip check, every scheduled run re-processes the entire first page (50 videos) every 30–60 minutes.
+Because new uploads always appear at the top of the playlist, a single-page fetch is sufficient for scheduled runs.
 
 ### n8n changes
 
 - Add a **Schedule Trigger** node (cron: `0 * * * *` for hourly, or `*/30 * * * *` for every 30 min) alongside the existing Manual Trigger.
 - Both triggers feed into the same Config node — no other changes needed.
-- Keep the Manual Trigger for the initial full back-catalogue scrape (with `full_scan` mode from the pagination feature).
 
-### Recommended rollout order
+---
 
-1. Idempotent re-runs (skip check)
-2. Scheduled trigger
-3. Pagination / `full_scan` mode for initial ingestion of large back-catalogues
+## Source Attribution — Widget Layer
 
-## Source Attribution: Publication Date & Timestamp Links
-
-**Goal:** Surface two complementary pieces of metadata alongside every chat answer — (1) the episode's publication date for staleness detection, and (2) a direct deeplink into the video at the exact moment the answer came from.
-
-> Full implementation plan for the timestamp deeplink feature: `docs/chunk-timestamp-attribution.md`
-
-### Why this matters
-
-- A user asking "what's the current best practice for X?" expects recent guidance. An answer drawn from a 3-year-old episode may be actively misleading. Without a date field the system has no signal to detect this mismatch.
-- For long-form content (podcasts, lectures) a bare video URL forces the user to scrub manually. VTT subtitle files downloaded by `yt-dlp` already contain per-second timestamps for every spoken line — this data is currently discarded during parsing. Preserving it enables deeplinks of the form `https://youtube.com/watch?v=VIDEO_ID&t=SECONDS` that jump directly to the relevant moment.
-
-### Two metadata fields
-
-Both fields are additive to the existing Qdrant payload (`video_id`, `title`, `channel`, `url`, `chunk_id`, `text`):
-
-```json
-{
-  "video_id": "abc123",
-  "chunk_id": 4,
-  "start_time": 754,
-  "published_at": "2023-11-14",
-  "title": "Episode 42 — …"
-}
-```
-
-- **`start_time`** — integer, seconds from video start. Derived from VTT cue timestamps during scraping. `null` when no subtitle file is available. Powers the "Watch at MM:SS" deeplink per source.
-- **`published_at`** — ISO-8601 date string (e.g. `"2023-11-14"`). Read from `snippet.publishedAt` in the YouTube playlist API response. Powers staleness detection and episode-level citation.
+**Goal:** Surface timestamp deeplinks and a staleness warning in the chat widget.
 
 ### Changes needed
 
-**Scraper service** (`start_time` only)
-- `_parse_vtt()`: return `List[Tuple[int, str]]` (start_seconds, text) instead of stripping timestamps to plain text.
-- `_chunk_transcript()`: track the start time of the first VTT segment in each chunk; attach it to the `Chunk` dataclass as `start_time: Optional[int]`.
-- `/transcript` response: include `start_time` in each chunk object.
-
-**n8n workflow**
-- "Embed and Ingest Chunks" node: add `start_time` from chunk data to the Qdrant point payload.
-- After "Fetch Playlist", map `snippet.publishedAt` → `published_at` for each video and include it in the Qdrant point payload.
-
-**Chat API**
-- `Source` model: add `start_time: Optional[int]` and `timestamp_url: Optional[str]` (the deeplink).
-- `/chat` endpoint: map `start_time` from Qdrant payload; compute `timestamp_url = url + "&t=" + start_time`.
-- Staleness detection: if all top-k results have `published_at` older than a configurable threshold (`STALENESS_THRESHOLD_DAYS`, default `730`), prepend a disclaimer to the LLM context and return `stale_sources: true` in the response body.
-- Include `published_at` in the context block sent to the LLM so the model can cite episodes naturally.
-
 **Widget**
-- Render a "Watch at MM:SS" link per source when `timestamp_url` is present.
+- Render a "Watch at MM:SS" link per source when `timestamp_url` is present in the `/chat` response.
 - Show a "Sources may be outdated" badge when `stale_sources: true`.
 
-### Temporal query intent (future enhancement)
+**Chat API**
+- Add staleness detection: if all top-k results have `published_at` older than `STALENESS_THRESHOLD_DAYS` (default `730`), prepend a disclaimer to the LLM context and return `stale_sources: true` in the response body.
 
-Once `published_at` is in place, the chat API can detect explicit recency language in a query ("recently", "latest", "current") and automatically apply a Qdrant date range filter so that semantically distant but recent content is not suppressed by older, higher-scoring hits.
+---
 
-### Open questions
+## Embeddable iframe & WordPress Plugin
 
-- Should `published_at` also be stored as a Unix timestamp integer (`published_at_ts`) to support Qdrant numeric range filters? Recommend adding it alongside the ISO string from the start.
-- Should `timestamp_url` be injected into the LLM context block so the model can cite "as discussed at 12:34 in Episode 42…"? Adds tokens but produces more natural answers.
-- Re-ingestion of existing points (no `start_time`): forward-only (new videos only) or one-time backfill via a `force_refresh` flag in the Config node? See `docs/chunk-timestamp-attribution.md` for trade-offs.
-
-## OpenAI-Compatible API & Embeddable Chat
-
-**Goal:** Expose the RAG pipeline as a standard `POST /v1/chat/completions` endpoint so any off-the-shelf chat client can connect to it, and serve a self-contained iframe chat page for embedding on external websites and WordPress.
-
-> Full spec and implementation order: `docs/openai-compatible-embed.md`
-
-### How it works
-
-- The `model` field doubles as a collection selector: `rag:podcasts`, `rag:finance-channel`, etc. Any non-`rag:` value falls back to the default collection.
-- The embed page (`GET /embed?collection=...`) is served as inline HTML from chat-api — no new service, no build step.
-- A WordPress plugin wraps the embed URL in a shortcode: `[rag_chat collection="podcasts"]`.
-- For local development, Open WebUI runs as an optional Docker service (`--profile dev`) and points at the new endpoint.
+**Goal:** Serve a self-contained iframe chat page and a WordPress shortcode plugin so any site can embed the RAG chat without touching the widget JS directly.
 
 ### Changes needed
 
 **`chat-api/main.py`**
-- Add `POST /v1/chat/completions` — accepts standard OpenAI messages, routes collection via `model` field, returns OpenAI-shaped response.
-- Add `GET /embed` — returns a self-contained HTML chat page (vanilla JS, no build); takes `?collection` and `?title` query params.
-
-**`docker-compose.yml`**
-- Add `open-webui` service under `profiles: [dev]`; points `OPENAI_API_BASE_URL` at `http://chat-api:8000/v1`. Starts only when `docker compose --profile dev up` is run.
+- Add `GET /embed` — returns a self-contained HTML chat page (vanilla JS, no build step); takes `?collection` and `?title` query params.
 
 **`wordpress-plugin/youtube-rag-chat.php`** _(new file)_
-- Single PHP file; registers `[rag_chat collection="..." url="..." height="..."]` shortcode that outputs the iframe. Drop into `wp-content/plugins/`, no dependencies.
-
-### What is NOT changing
-
-- Existing `/chat` endpoint and widget — untouched.
-- Qdrant schema, n8n workflow, scraper-service — no changes.
-- No new Dockerfiles or Python services.
-
-### Implementation order
-
-1. `POST /v1/chat/completions` in `chat-api/main.py` — unblocks all client testing
-2. Open WebUI dev service in `docker-compose.yml` — local chat UI
-3. `GET /embed` in `chat-api/main.py` — iframe story
-4. `wordpress-plugin/youtube-rag-chat.php` — WordPress plugin
-
-## Collection Status Counter
-
-**Goal:** Expose a lightweight status endpoint that shows how many videos and chunks are currently stored in a collection, so the n8n dashboard (or any monitoring tool) can display ingestion progress at a glance.
-
-### How it works
-
-`GET /stats?collection=<name>` (collection defaults to `QDRANT_COLLECTION`) hits two Qdrant endpoints and returns a small summary JSON:
-
-```json
-{
-  "collection": "podcasts",
-  "status": "green",
-  "total_videos": 42,
-  "total_chunks": 1830,
-  "avg_chunks_per_video": 43.6
-}
-```
-
-- **`total_chunks`** — exact point count from Qdrant's collection info.
-- **`total_videos`** — count of points where `chunk_id == 0` (the first chunk of every ingested video). This is a reliable proxy for distinct video count as long as all ingestions complete successfully; partially-failed videos that produced no chunks will not appear.
-- **`status`** — Qdrant's own collection health (`green` / `yellow` / `red`).
-
-### How to wire it into n8n
-
-Add an **HTTP Request** node at the start (or end) of the ingestion workflow:
-
-- Method: `GET`
-- URL: `http://chat-api:8000/stats`
-- Output the result to a **Set** node or log it to the workflow execution data.
-
-This gives a before/after snapshot of the collection size without any additional infrastructure.
-
-### Reliability caveats
-
-- `total_videos` undercounts if a video was partially ingested (chunks uploaded but the run aborted before chunk 0 was written — unlikely but possible with out-of-order upserts).
-- Overcounts are not possible: a video that was re-ingested idempotently still has exactly one `chunk_id == 0` point.
-- The count reflects the live Qdrant state, not n8n workflow history — resets or collection drops are immediately visible.
-
-### Status
-
-Implemented: `GET /stats` is live in `chat-api/main.py`.
+- Single PHP file; registers `[rag_chat collection="..." url="..." height="..."]` shortcode that outputs the iframe.
+- Drop into `wp-content/plugins/`, no dependencies.
 
 <!-- Add new features below this line -->

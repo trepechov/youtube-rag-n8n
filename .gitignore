@@ -23,6 +23,9 @@ venv/
 # Docker
 *.log
 
+# Demo password file (generate locally, never commit)
+nginx/.htpasswd
+
 # IDE
 .vscode/
 .idea/

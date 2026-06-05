@@ -41,6 +41,20 @@ services:
       - internal
       - web
 
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    restart: always
+    environment:
+      OPENAI_API_BASE_URL: http://chat-api:8000/v1
+      WEBUI_AUTH: "False"
+      DEFAULT_MODELS: "rag:${QDRANT_COLLECTION:-podcasts}"
+    volumes:
+      - open_webui_data:/app/backend/data
+    depends_on:
+      - chat-api
+    networks:
+      - internal
+
   nginx:
     image: nginx:alpine
     restart: always
@@ -49,18 +63,21 @@ services:
       - "443:443"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx/.htpasswd:/etc/nginx/.htpasswd:ro
       - ./widget:/var/www/widget:ro
       - nginx_certs:/etc/nginx/certs
       - nginx_logs:/var/log/nginx
     depends_on:
       - chat-api
       - n8n
+      - open-webui
     networks:
       - web
 
 volumes:
   nginx_certs:
   nginx_logs:
+  open_webui_data:
 
 networks:
   web:

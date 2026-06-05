@@ -28,7 +28,7 @@ cp .env.example .env
 # Open .env and fill in:
 #   OPENROUTER_API_KEY  — your OpenRouter key
 #   QDRANT_COLLECTION   — a short slug for the podcast you're ingesting
-#                         e.g. lex-fridman-podcast, huberman-lab, my-show
+#                         e.g. my-podcast, huberman-lab, my-show
 ```
 
 ### Step 3 — Start the app
@@ -51,7 +51,7 @@ docker compose up -d
      - Single playlist: `PLrAXtmErZgOfMuxkptxDyMcFpl2tMkhuw:My Show`
      - Multiple playlists: `PL111:My Course,PL222:Interview Prep`
      - Bare ID (no name) still works: `PLrAXtmErZgOfMuxkptxDyMcFpl2tMkhuw`
-   - `collection` — the same slug you set in `QDRANT_COLLECTION` (e.g. `lex-fridman-podcast`)
+   - `collection` — the same slug you set in `QDRANT_COLLECTION` (e.g. `my-podcast`)
 
    Each chunk stored in Qdrant carries a `playlist_name` payload field, which you can filter on:
    ```json
@@ -64,7 +64,7 @@ docker compose up -d
 ```bash
 curl -X POST http://localhost:8000/chat \
   -H "Content-Type: application/json" \
-  -d '{"question": "What topics were discussed?", "collection": "lex-fridman-podcast"}'
+  -d '{"question": "What topics were discussed?", "collection": "my-podcast"}'
 ```
 
 You should get back an answer with cited sources from your playlist.
@@ -79,7 +79,7 @@ You should get back an answer with cited sources from your playlist.
 <script
   src="http://localhost:8000/widget/chat-widget.js"
   data-api-url="http://localhost:8000"
-  data-collection="lex-fridman-podcast"
+  data-collection="my-podcast"
   data-title="Ask the Podcast"
 ></script>
 ```
@@ -91,11 +91,20 @@ docker compose --profile dev up -d
 # Open WebUI available at http://localhost:3000
 ```
 
-**Deploy to a VPS:**
+**Deploy to a VPS (with password protection):**
 
 ```bash
-docker compose -f docker-compose.prod.yml up -d
+# 1. Generate the shared password file (once, on the server)
+printf "demo:$(openssl passwd -apr1 yourpassword)\n" > nginx/.htpasswd
+
+# 2. Start everything
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 ```
+
+Share `http://your-server-ip` + the password with friends.
+- **`/`** → Open WebUI chat (password required)
+- **`/n8n/`** → ingestion workflow editor (password required)
+- **`/api/`** → RAG API (public — for embedded widgets)
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for full details on production setup, SSL, and security hardening.
 
