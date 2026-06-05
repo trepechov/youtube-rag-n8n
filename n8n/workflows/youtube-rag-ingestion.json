@@ -18,8 +18,8 @@
           "assignments": [
             {
               "id": "cfg-01",
-              "name": "playlist_id",
-              "value": "REPLACE_WITH_YOUR_PLAYLIST_ID",
+              "name": "playlist_ids",
+              "value": "REPLACE_WITH_PLAYLIST_ID:My Playlist",
               "type": "string"
             },
             {
@@ -115,16 +115,43 @@
       ]
     },
     {
+      "parameters": {
+        "jsCode": "const raw = $('Config').first().json.playlist_ids;\nconst entries = raw.split(',').map(s => s.trim()).filter(Boolean);\nreturn entries.map(entry => {\n  const colonIdx = entry.indexOf(':');\n  if (colonIdx === -1) return { json: { playlist_id: entry, playlist_name: entry } };\n  return { json: {\n    playlist_id:   entry.slice(0, colonIdx).trim(),\n    playlist_name: entry.slice(colonIdx + 1).trim(),\n  }};\n});"
+      },
+      "id": "b1a2c3d4-000d-4000-a000-00000000000d",
+      "name": "Split Playlist IDs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "b1a2c3d4-000e-4000-a000-00000000000e",
+      "name": "Loop Playlists",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1100,
+        300
+      ]
+    },
+    {
       "id": "b1a2c3d4-0004-4000-a000-000000000004",
       "name": "Fetch All Videos",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1100,
+        1320,
         300
       ],
       "parameters": {
-        "jsCode": "const config = $('Config').first().json;\nconst baseUrl = 'https://www.googleapis.com/youtube/v3/playlistItems';\nconst allVideos = [];\nlet pageToken = null;\n\ndo {\n  let url = baseUrl\n    + '?part=snippet'\n    + '&playlistId=' + encodeURIComponent(config.playlist_id)\n    + '&maxResults=50'\n    + '&key=' + encodeURIComponent(config.youtube_api_key);\n  if (pageToken) url += '&pageToken=' + encodeURIComponent(pageToken);\n\n  const resp = await this.helpers.httpRequest({\n    method: 'GET',\n    url,\n    json: true,\n  });\n\n  for (const item of (resp.items || [])) {\n    const videoId = item.snippet && item.snippet.resourceId && item.snippet.resourceId.videoId;\n    if (videoId) {\n      allVideos.push({\n        video_id:        videoId,\n        published_at:    (item.snippet.publishedAt || null),\n        collection:      config.collection,\n        chunk_size:      config.chunk_size,\n        embedding_model: config.embedding_model,\n      });\n    }\n  }\n\n  pageToken = resp.nextPageToken || null;\n} while (pageToken);\n\nreturn allVideos.map(v => ({ json: v }));"
+        "jsCode": "const loopItem = $('Loop Playlists').first().json;\nconst playlistId = loopItem.playlist_id;\nconst playlistName = loopItem.playlist_name;\nconst config = $('Config').first().json;\nconst baseUrl = 'https://www.googleapis.com/youtube/v3/playlistItems';\nconst allVideos = [];\nlet pageToken = null;\n\ndo {\n  let url = baseUrl\n    + '?part=snippet'\n    + '&playlistId=' + encodeURIComponent(playlistId)\n    + '&maxResults=50'\n    + '&key=' + encodeURIComponent(config.youtube_api_key);\n  if (pageToken) url += '&pageToken=' + encodeURIComponent(pageToken);\n\n  const resp = await this.helpers.httpRequest({\n    method: 'GET',\n    url,\n    json: true,\n  });\n\n  for (const item of (resp.items || [])) {\n    const videoId = item.snippet && item.snippet.resourceId && item.snippet.resourceId.videoId;\n    if (videoId) {\n      allVideos.push({\n        video_id:        videoId,\n        published_at:    (item.snippet.publishedAt || null),\n        collection:      config.collection,\n        chunk_size:      config.chunk_size,\n        embedding_model: config.embedding_model,\n        playlist_name: playlistName,\n      });\n    }\n  }\n\n  pageToken = resp.nextPageToken || null;\n} while (pageToken);\n\nreturn allVideos.map(v => ({ json: v }));"
       }
     },
     {
@@ -222,7 +249,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const transcript = $input.first().json;\nconst config = $('Config').first().json;\nconst loopData = $('Loop Videos').first().json;\n\nif (!transcript.chunks || transcript.chunks.length === 0) {\n  return [{ json: { status: 'skipped', video_id: transcript.video_id || 'unknown' } }];\n}\n\nfunction hashId(str) {\n  let h = 2166136261;\n  for (let i = 0; i < str.length; i++) {\n    h = Math.imul(h ^ str.charCodeAt(i), 16777619) >>> 0;\n  }\n  const hex = h.toString(16).padStart(8, '0').repeat(4).slice(0, 32);\n  return `${hex.slice(0,8)}-${hex.slice(8,12)}-4${hex.slice(12,15)}-a${hex.slice(15,18)}-${hex.slice(18,30)}`;\n}\n\nasync function embedBatch(texts) {\n  for (let attempt = 0; attempt < 4; attempt++) {\n    try {\n      const resp = await this.helpers.httpRequest({\n        method: 'POST',\n        url: config.embedding_url + '/v1/embeddings',\n        headers: { Authorization: 'Bearer ' + config.openrouter_api_key },\n        body: { model: config.embedding_model, input: texts },\n        json: true,\n      });\n      return resp.data.map(d => d.embedding);\n    } catch (err) {\n      if (attempt === 3) throw err;\n      await new Promise(r => setTimeout(r, 2000 * Math.pow(2, attempt)));\n    }\n  }\n}\n\nconst EMBED_BATCH = config.embed_batch_size || 50;\nconst chunks = transcript.chunks;\nconst allVectors = [];\n\nfor (let i = 0; i < chunks.length; i += EMBED_BATCH) {\n  const batch = chunks.slice(i, i + EMBED_BATCH);\n  const vectors = await embedBatch.call(this, batch.map(c => c.text));\n  allVectors.push(...vectors);\n  if (i + EMBED_BATCH < chunks.length) {\n    await new Promise(r => setTimeout(r, 600));\n  }\n}\n\nconst points = chunks.map((chunk, idx) => ({\n  id: hashId(`${transcript.video_id}_${chunk.chunk_id}`),\n  vector: allVectors[idx],\n  payload: {\n    video_id: transcript.video_id,\n    title:    transcript.title,\n    channel:  transcript.channel,\n    url:          transcript.url,\n    published_at: loopData.published_at || null,\n    chunk_id:     chunk.chunk_id,\n    start_time: chunk.start_time ?? null,\n    text:       chunk.text,\n  },\n}));\n\nconst QDRANT_BATCH = 100;\nfor (let i = 0; i < points.length; i += QDRANT_BATCH) {\n  await this.helpers.httpRequest({\n    method: 'PUT',\n    url: config.qdrant_url + '/collections/' + config.collection + '/points',\n    body: { points: points.slice(i, i + QDRANT_BATCH) },\n    json: true,\n  });\n}\n\nreturn [{ json: { status: 'ok', video_id: transcript.video_id, title: transcript.title, chunks_stored: chunks.length } }];"
+        "jsCode": "const transcript = $input.first().json;\nconst config = $('Config').first().json;\nconst loopData = $('Loop Videos').first().json;\n\nif (!transcript.chunks || transcript.chunks.length === 0) {\n  return [{ json: { status: 'skipped', video_id: transcript.video_id || 'unknown' } }];\n}\n\nfunction hashId(str) {\n  let h = 2166136261;\n  for (let i = 0; i < str.length; i++) {\n    h = Math.imul(h ^ str.charCodeAt(i), 16777619) >>> 0;\n  }\n  const hex = h.toString(16).padStart(8, '0').repeat(4).slice(0, 32);\n  return `${hex.slice(0,8)}-${hex.slice(8,12)}-4${hex.slice(12,15)}-a${hex.slice(15,18)}-${hex.slice(18,30)}`;\n}\n\nasync function embedBatch(texts) {\n  for (let attempt = 0; attempt < 4; attempt++) {\n    try {\n      const resp = await this.helpers.httpRequest({\n        method: 'POST',\n        url: config.embedding_url + '/v1/embeddings',\n        headers: { Authorization: 'Bearer ' + config.openrouter_api_key },\n        body: { model: config.embedding_model, input: texts },\n        json: true,\n      });\n      return resp.data.map(d => d.embedding);\n    } catch (err) {\n      if (attempt === 3) throw err;\n      await new Promise(r => setTimeout(r, 2000 * Math.pow(2, attempt)));\n    }\n  }\n}\n\nconst EMBED_BATCH = config.embed_batch_size || 50;\nconst chunks = transcript.chunks;\nconst allVectors = [];\n\nfor (let i = 0; i < chunks.length; i += EMBED_BATCH) {\n  const batch = chunks.slice(i, i + EMBED_BATCH);\n  const vectors = await embedBatch.call(this, batch.map(c => c.text));\n  allVectors.push(...vectors);\n  if (i + EMBED_BATCH < chunks.length) {\n    await new Promise(r => setTimeout(r, 600));\n  }\n}\n\nconst points = chunks.map((chunk, idx) => ({\n  id: hashId(`${transcript.video_id}_${chunk.chunk_id}`),\n  vector: allVectors[idx],\n  payload: {\n    video_id:      transcript.video_id,\n    title:         transcript.title,\n    channel:       transcript.channel,\n    url:           transcript.url,\n    published_at:  loopData.published_at || null,\n    playlist_name: loopData.playlist_name || null,\n    chunk_id:      chunk.chunk_id,\n    start_time:    chunk.start_time ?? null,\n    text:          chunk.text,\n  },\n}));\n\nconst QDRANT_BATCH = 100;\nfor (let i = 0; i < points.length; i += QDRANT_BATCH) {\n  await this.helpers.httpRequest({\n    method: 'PUT',\n    url: config.qdrant_url + '/collections/' + config.collection + '/points',\n    body: { points: points.slice(i, i + QDRANT_BATCH) },\n    json: true,\n  });\n}\n\nreturn [{ json: { status: 'ok', video_id: transcript.video_id, title: transcript.title, chunks_stored: chunks.length } }];"
       },
       "id": "b1a2c3d4-0008-4000-a000-000000000008",
       "name": "Embed and Ingest Chunks",
@@ -242,8 +269,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1760,
-        120
+        1100,
+        80
       ]
     },
     {
@@ -306,7 +333,47 @@
       "main": [
         [
           {
+            "node": "Split Playlist IDs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Playlist IDs": {
+      "main": [
+        [
+          {
+            "node": "Loop Playlists",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Playlists": {
+      "main": [
+        [
+          {
+            "node": "Fetch Final Stats",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
             "node": "Fetch All Videos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch All Videos": {
+      "main": [
+        [
+          {
+            "node": "Loop Videos",
             "type": "main",
             "index": 0
           }
@@ -317,7 +384,7 @@
       "main": [
         [
           {
-            "node": "Fetch Final Stats",
+            "node": "Loop Playlists",
             "type": "main",
             "index": 0
           }
@@ -371,17 +438,6 @@
         ]
       ]
     },
-    "Embed and Ingest Chunks": {
-      "main": [
-        [
-          {
-            "node": "Loop Videos",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
     "Has Transcript?": {
       "main": [
         [
@@ -400,7 +456,7 @@
         ]
       ]
     },
-    "Fetch All Videos": {
+    "Embed and Ingest Chunks": {
       "main": [
         [
           {
