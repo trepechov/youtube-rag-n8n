@@ -43,6 +43,7 @@ services:
 
   open-webui:
     image: ghcr.io/open-webui/open-webui:main
+    profiles: []
     restart: always
     environment:
       OPENAI_API_BASE_URL: http://chat-api:8000/v1
