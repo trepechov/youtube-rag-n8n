@@ -1,0 +1,17 @@
+name: PR Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  copilot-review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: github/copilot-pull-request-reviewer@v1
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
