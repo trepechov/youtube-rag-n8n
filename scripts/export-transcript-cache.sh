@@ -9,12 +9,19 @@ set -euo pipefail
 VOLUME="${TRANSCRIPT_CACHE_VOLUME:-youtube-rag-n8n_transcript_cache}"
 OUTPUT="${1:-transcript_cache_$(date +%Y%m%d).tar.gz}"
 
-echo "Exporting volume '$VOLUME' → $OUTPUT ..."
+# Resolve output to an absolute path so the container volume mount works regardless of
+# whether the caller passes a relative or absolute path.
+mkdir -p "$(dirname "${OUTPUT}")"
+OUTPUT_ABS="$(cd "$(dirname "${OUTPUT}")" && pwd)/$(basename "${OUTPUT}")"
+OUTPUT_DIR="$(dirname "${OUTPUT_ABS}")"
+OUTPUT_FILE="$(basename "${OUTPUT_ABS}")"
+
+echo "Exporting volume '$VOLUME' → ${OUTPUT_ABS} ..."
 docker run --rm \
   -v "${VOLUME}:/cache:ro" \
-  -v "$(pwd):/backup" \
+  -v "${OUTPUT_DIR}:/backup" \
   alpine \
-  tar czf "/backup/${OUTPUT}" -C /cache .
+  tar czf "/backup/${OUTPUT_FILE}" -C /cache .
 
 echo "Done. Transfer with:"
-echo "  scp ${OUTPUT} user@prod-server:/path/to/youtube-rag-n8n/"
+echo "  scp ${OUTPUT_ABS} user@prod-server:/path/to/youtube-rag-n8n/"
