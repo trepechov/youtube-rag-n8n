@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Imports a tar.gz file (from export-transcript-cache.sh) into the transcript_cache volume.
 # Usage: ./scripts/import-transcript-cache.sh <file.tar.gz>
-# Merges into the existing volume — already-cached files are overwritten, others kept.
+# Existing files with the same name are overwritten; other files in the volume are kept.
+# Override volume name: TRANSCRIPT_CACHE_VOLUME=myproject_transcript_cache ./scripts/import-transcript-cache.sh <file>
 
 set -euo pipefail
 
-VOLUME="youtube-rag-n8n_transcript_cache"
+VOLUME="${TRANSCRIPT_CACHE_VOLUME:-youtube-rag-n8n_transcript_cache}"
 INPUT="${1:-}"
 
 if [[ -z "$INPUT" ]]; then

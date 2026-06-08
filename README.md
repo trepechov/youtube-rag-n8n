@@ -124,7 +124,7 @@ scp transcript_cache_20260608.tar.gz user@your-server:/path/to/youtube-rag-n8n/
 ./scripts/import-transcript-cache.sh transcript_cache_20260608.tar.gz
 ```
 
-The import merges — transcripts already on the server are kept, new ones are added. No service restart needed; the scraper-service picks up the files immediately.
+The import merges into the existing volume. New transcripts are added; existing files with the same video ID are overwritten by the imported version. No service restart needed; the scraper-service picks up the files immediately.
 
 ---
 
@@ -176,7 +176,7 @@ n8n Trigger
   └─► Set Config (playlist ID, collection name)
   └─► YouTube API: fetch all playlist video IDs
   └─► [loop per video]
-        └─► Scraper Service: download transcript via yt-dlp
+        └─► Scraper Service: download transcript via youtube-transcript-api
         └─► [loop per chunk]
               └─► OpenRouter: generate embedding (nvidia/llama-nemotron, free)
               └─► Qdrant: upsert vector + payload
