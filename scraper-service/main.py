@@ -9,6 +9,7 @@ from typing import Optional
 import requests
 from fastapi import FastAPI, HTTPException
 
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 from pydantic import BaseModel
 from youtube_transcript_api import (
@@ -269,12 +270,17 @@ def get_transcript(req: TranscriptRequest):
         cached = False
         try:
             data = _download_transcript(req.video_id, req.langs, req.title, req.channel)
+            source = "supadata" if SUPADATA_API_KEY else "youtube"
+            logger.info("[DOWNLOADED] %s via %s", req.video_id, source)
         except RuntimeError as exc:
+            logger.warning("[BLOCKED] %s — %s", req.video_id, str(exc)[:120])
             raise HTTPException(status_code=422, detail=str(exc))
         except Exception as exc:
             logger.exception("Unexpected error fetching transcript for %s", req.video_id)
             raise HTTPException(status_code=500, detail="Internal server error")
         _save_to_cache(data)
+    else:
+        logger.info("[CACHE HIT] %s", req.video_id)
 
     chunks = _chunk_segments(data["segments"], req.chunk_size)
 
