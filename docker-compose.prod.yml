@@ -33,6 +33,8 @@ services:
   scraper-service:
     restart: always
     ports: []  # Internal only
+    environment:
+      SUPADATA_API_KEY: ${SUPADATA_API_KEY}
     volumes:
       - transcript_cache:/cache
 

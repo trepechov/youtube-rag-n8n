@@ -6,6 +6,7 @@ import tempfile
 from pathlib import Path
 from typing import Optional
 
+import requests
 from fastapi import FastAPI, HTTPException
 
 logger = logging.getLogger(__name__)
@@ -62,6 +63,7 @@ def _build_api() -> YouTubeTranscriptApi:
     return YouTubeTranscriptApi()
 
 _yt_api = _build_api()
+SUPADATA_API_KEY = os.environ.get("SUPADATA_API_KEY", "").strip()
 
 CACHE_DIR = Path(os.environ.get("TRANSCRIPT_CACHE_DIR", "/cache"))
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -116,7 +118,25 @@ def _save_to_cache(data: dict) -> None:
 # Transcript extraction
 # ---------------------------------------------------------------------------
 
-def _download_transcript(
+def _fetch_from_supadata(video_id: str, title: str, channel: str) -> dict:
+    resp = requests.get(
+        "https://api.supadata.ai/v1/youtube/transcript",
+        params={"videoId": video_id},
+        headers={"x-api-key": SUPADATA_API_KEY},
+        timeout=30,
+    )
+    if resp.status_code == 402:
+        raise RuntimeError("Supadata quota exhausted — check your plan at supadata.ai")
+    if not resp.ok:
+        raise RuntimeError(f"Supadata returned {resp.status_code}: {resp.text[:200]}")
+    content = resp.json().get("content") or []
+    if not content:
+        raise RuntimeError("No subtitles found — Supadata returned empty transcript")
+    segments = [(item["offset"] // 1000, item["text"]) for item in content]
+    return {"id": video_id, "title": title, "channel": channel, "segments": segments}
+
+
+def _fetch_from_youtube(
     video_id: str, langs: list[str], title: str, channel: str
 ) -> dict:
     try:
@@ -178,12 +198,15 @@ def _download_transcript(
     # 1.x returns FetchedTranscriptSnippet objects with .start/.text attributes.
     segments = [(int(snippet.start), snippet.text) for snippet in fetched]
 
-    return {
-        "id": video_id,
-        "title": title,
-        "channel": channel,
-        "segments": segments,
-    }
+    return {"id": video_id, "title": title, "channel": channel, "segments": segments}
+
+
+def _download_transcript(
+    video_id: str, langs: list[str], title: str, channel: str
+) -> dict:
+    if SUPADATA_API_KEY:
+        return _fetch_from_supadata(video_id, title, channel)
+    return _fetch_from_youtube(video_id, langs, title, channel)
 
 
 # ---------------------------------------------------------------------------
