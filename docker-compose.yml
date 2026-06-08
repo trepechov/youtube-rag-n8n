@@ -61,6 +61,7 @@ services:
     environment:
       HTTP_PROXY_URL:  ${YOUTUBE_HTTP_PROXY_URL:-}
       HTTPS_PROXY_URL: ${YOUTUBE_HTTPS_PROXY_URL:-}
+      SUPADATA_API_KEY: ${SUPADATA_API_KEY:-}
     volumes:
       - transcript_cache:/cache
     networks:
