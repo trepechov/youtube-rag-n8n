@@ -33,6 +33,8 @@ services:
   scraper-service:
     restart: always
     ports: []  # Internal only
+    volumes:
+      - transcript_cache:/cache
 
   chat-api:
     restart: always
@@ -81,6 +83,7 @@ volumes:
   nginx_certs:
   nginx_logs:
   open_webui_data:
+  transcript_cache:
 
 networks:
   web:

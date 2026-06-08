@@ -58,6 +58,11 @@ services:
     restart: unless-stopped
     ports:
       - "${SCRAPER_PORT:-8001}:8001"
+    environment:
+      HTTP_PROXY_URL:  ${YOUTUBE_HTTP_PROXY_URL:-}
+      HTTPS_PROXY_URL: ${YOUTUBE_HTTPS_PROXY_URL:-}
+    volumes:
+      - transcript_cache:/cache
     networks:
       - internal
 
@@ -109,6 +114,7 @@ volumes:
   n8n_data:
   qdrant_data:
   open_webui_data:
+  transcript_cache:
 
 networks:
   internal:
