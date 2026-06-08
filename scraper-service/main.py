@@ -1,5 +1,7 @@
+import json
 import os
 import re
+from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException
@@ -36,6 +38,7 @@ class TranscriptResponse(BaseModel):
     channel: str
     url: str
     chunks: list[Chunk]
+    cached: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -55,6 +58,24 @@ def _build_api() -> YouTubeTranscriptApi:
     return YouTubeTranscriptApi()
 
 _yt_api = _build_api()
+
+CACHE_DIR = Path(os.environ.get("TRANSCRIPT_CACHE_DIR", "/cache"))
+CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _cache_path(video_id: str) -> Path:
+    return CACHE_DIR / f"{video_id}.json"
+
+
+def _load_from_cache(video_id: str) -> dict | None:
+    p = _cache_path(video_id)
+    if p.exists():
+        return json.loads(p.read_text())
+    return None
+
+
+def _save_to_cache(data: dict) -> None:
+    _cache_path(data["id"]).write_text(json.dumps(data, ensure_ascii=False))
 
 
 # ---------------------------------------------------------------------------
@@ -178,12 +199,17 @@ def health():
 
 @app.post("/transcript", response_model=TranscriptResponse)
 def get_transcript(req: TranscriptRequest):
-    try:
-        data = _download_transcript(req.video_id, req.langs, req.title, req.channel)
-    except RuntimeError as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Unexpected error: {exc}")
+    cached = True
+    data = _load_from_cache(req.video_id)
+    if data is None:
+        cached = False
+        try:
+            data = _download_transcript(req.video_id, req.langs, req.title, req.channel)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Unexpected error: {exc}")
+        _save_to_cache(data)
 
     chunks = _chunk_segments(data["segments"], req.chunk_size)
 
@@ -193,4 +219,5 @@ def get_transcript(req: TranscriptRequest):
         channel=data["channel"],
         url=f"https://www.youtube.com/watch?v={data['id']}",
         chunks=chunks,
+        cached=cached,
     )

@@ -103,7 +103,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const config = $('Config').first().json;\nconst url = config.qdrant_url + '/collections/' + config.collection;\n\nlet exists = false;\ntry {\n  const resp = await this.helpers.httpRequest({ method: 'GET', url, json: true });\n  exists = resp && resp.result && resp.result.status === 'green';\n} catch (e) {\n  exists = false;\n}\n\nif (!exists) {\n  await this.helpers.httpRequest({\n    method: 'PUT',\n    url,\n    body: { vectors: { size: 2048, distance: 'Cosine' } },\n    json: true,\n  });\n}\n\nreturn [{ json: { collection: config.collection, created: !exists } }];"
+        "jsCode": "const sd = $getWorkflowStaticData('global');\nsd.consecutiveTranscriptErrors = 0;\nsd.transcriptsDownloaded = 0;\nsd.transcriptsCached = 0;\n\nconst config = $('Config').first().json;\nconst url = config.qdrant_url + '/collections/' + config.collection;\n\nlet exists = false;\ntry {\n  const resp = await this.helpers.httpRequest({ method: 'GET', url, json: true });\n  exists = resp && resp.result && resp.result.status === 'green';\n} catch (e) {\n  exists = false;\n}\n\nif (!exists) {\n  await this.helpers.httpRequest({\n    method: 'PUT',\n    url,\n    body: { vectors: { size: 2048, distance: 'Cosine' } },\n    json: true,\n  });\n}\n\nreturn [{ json: { collection: config.collection, created: !exists } }];"
       },
       "id": "b1a2c3d4-0003-4000-a000-000000000003",
       "name": "Ensure Collection",
@@ -215,6 +215,51 @@
     },
     {
       "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst sd = $getWorkflowStaticData('global');\nreturn [{ json: { ...item, _rateLocked: (sd.consecutiveTranscriptErrors || 0) >= 3 } }];"
+      },
+      "id": "b1a2c3d4-0010-4000-a000-000000000010",
+      "name": "Check Rate Lock",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2310,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-rate-lock",
+              "leftValue": "={{ $json._rateLocked }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b1a2c3d4-0011-4000-a000-000000000011",
+      "name": "Skip if Rate Locked?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2530,
+        520
+      ]
+    },
+    {
+      "parameters": {
         "method": "POST",
         "url": "={{ $('Config').first().json.scraper_url + '/transcript' }}",
         "sendBody": true,
@@ -257,6 +302,19 @@
     },
     {
       "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst sd = $getWorkflowStaticData('global');\nconst isError = !item.chunks || item.chunks.length === 0;\nif (isError) {\n  sd.consecutiveTranscriptErrors = (sd.consecutiveTranscriptErrors || 0) + 1;\n} else {\n  sd.consecutiveTranscriptErrors = 0;\n  if (item.cached) {\n    sd.transcriptsCached = (sd.transcriptsCached || 0) + 1;\n  } else {\n    sd.transcriptsDownloaded = (sd.transcriptsDownloaded || 0) + 1;\n  }\n}\nreturn [{ json: { ...item, _consecutiveErrors: sd.consecutiveTranscriptErrors } }];"
+      },
+      "id": "b1a2c3d4-0012-4000-a000-000000000012",
+      "name": "Track Rate Limit",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2640,
+        300
+      ]
+    },
+    {
+      "parameters": {
         "jsCode": "const transcript = $input.first().json;\nconst config = $('Config').first().json;\nconst loopData = $('Loop Videos').first().json;\n\nif (!transcript.chunks || transcript.chunks.length === 0) {\n  return [{ json: { status: 'skipped', video_id: transcript.video_id || 'unknown' } }];\n}\n\nfunction hashId(str) {\n  let h = 2166136261;\n  for (let i = 0; i < str.length; i++) {\n    h = Math.imul(h ^ str.charCodeAt(i), 16777619) >>> 0;\n  }\n  const hex = h.toString(16).padStart(8, '0').repeat(4).slice(0, 32);\n  return `${hex.slice(0,8)}-${hex.slice(8,12)}-4${hex.slice(12,15)}-a${hex.slice(15,18)}-${hex.slice(18,30)}`;\n}\n\nasync function embedBatch(texts) {\n  for (let attempt = 0; attempt < 4; attempt++) {\n    try {\n      const resp = await this.helpers.httpRequest({\n        method: 'POST',\n        url: config.embedding_url + '/v1/embeddings',\n        headers: { Authorization: 'Bearer ' + config.openrouter_api_key },\n        body: { model: config.embedding_model, input: texts },\n        json: true,\n      });\n      return resp.data.map(d => d.embedding);\n    } catch (err) {\n      if (attempt === 3) throw err;\n      await new Promise(r => setTimeout(r, 2000 * Math.pow(2, attempt)));\n    }\n  }\n}\n\nconst EMBED_BATCH = config.embed_batch_size || 50;\nconst chunks = transcript.chunks;\nconst allVectors = [];\n\nfor (let i = 0; i < chunks.length; i += EMBED_BATCH) {\n  const batch = chunks.slice(i, i + EMBED_BATCH);\n  const vectors = await embedBatch.call(this, batch.map(c => c.text));\n  allVectors.push(...vectors);\n  if (i + EMBED_BATCH < chunks.length) {\n    await new Promise(r => setTimeout(r, 600));\n  }\n}\n\nconst points = chunks.map((chunk, idx) => ({\n  id: hashId(`${loopData.playlist_id}_${transcript.video_id}_${chunk.chunk_id}`),\n  vector: allVectors[idx],\n  payload: {\n    video_id:      transcript.video_id,\n    playlist_id:   loopData.playlist_id || null,\n    title:         transcript.title,\n    channel:       transcript.channel,\n    url:           transcript.url,\n    published_at:  loopData.published_at || null,\n    playlist_name: loopData.playlist_name || null,\n    chunk_id:      chunk.chunk_id,\n    start_time:    chunk.start_time ?? null,\n    text:          chunk.text,\n  },\n}));\n\nconst QDRANT_BATCH = 100;\nfor (let i = 0; i < points.length; i += QDRANT_BATCH) {\n  await this.helpers.httpRequest({\n    method: 'PUT',\n    url: config.qdrant_url + '/collections/' + config.collection + '/points',\n    body: { points: points.slice(i, i + QDRANT_BATCH) },\n    json: true,\n  });\n}\n\nreturn [{ json: { status: 'ok', video_id: transcript.video_id, title: transcript.title, chunks_stored: chunks.length } }];"
       },
       "id": "b1a2c3d4-0008-4000-a000-000000000008",
@@ -270,7 +328,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const config = $('Config').first().json;\nconst chatApiUrl = config.chat_api_url || 'http://chat-api:8000';\nconst collection = config.collection || 'podcasts';\n\nconst stats = await this.helpers.httpRequest({\n  method: 'GET',\n  url: `${chatApiUrl}/stats?collection=${collection}`,\n  json: true,\n});\n\nreturn [{ json: stats }];"
+        "jsCode": "const config = $('Config').first().json;\nconst chatApiUrl = config.chat_api_url || 'http://chat-api:8000';\nconst collection = config.collection || 'podcasts';\nconst sd = $getWorkflowStaticData('global');\n\nconst stats = await this.helpers.httpRequest({\n  method: 'GET',\n  url: `${chatApiUrl}/stats?collection=${collection}`,\n  json: true,\n});\n\nreturn [{ json: {\n  ...stats,\n  transcripts_downloaded: sd.transcriptsDownloaded || 0,\n  transcripts_from_cache: sd.transcriptsCached || 0,\n} }];"
       },
       "id": "b1a2c3d4-0009-4000-a000-000000000009",
       "name": "Fetch Final Stats",
@@ -309,7 +367,7 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
       "position": [
-        2640,
+        2860,
         300
       ]
     }
@@ -428,6 +486,35 @@
         ],
         [
           {
+            "node": "Check Rate Lock",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Rate Lock": {
+      "main": [
+        [
+          {
+            "node": "Skip if Rate Locked?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip if Rate Locked?": {
+      "main": [
+        [
+          {
+            "node": "Loop Videos",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
             "node": "Get Transcript",
             "type": "main",
             "index": 0
@@ -436,6 +523,17 @@
       ]
     },
     "Get Transcript": {
+      "main": [
+        [
+          {
+            "node": "Track Rate Limit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Track Rate Limit": {
       "main": [
         [
           {

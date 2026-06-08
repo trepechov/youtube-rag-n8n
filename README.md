@@ -108,6 +108,24 @@ Share `http://your-server-ip` + the password with friends.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for full details on production setup, SSL, and security hardening.
 
+**Sync the transcript cache between environments:**
+
+Transcripts are cached in a Docker volume (`transcript_cache`) so they're never downloaded twice. To move the cache from your local machine to production:
+
+```bash
+# 1. On local — export the volume to a tar.gz
+./scripts/export-transcript-cache.sh
+# Creates: transcript_cache_YYYYMMDD.tar.gz
+
+# 2. Copy it to the server
+scp transcript_cache_20260608.tar.gz user@your-server:/path/to/youtube-rag-n8n/
+
+# 3. On the server — merge it into the production volume
+./scripts/import-transcript-cache.sh transcript_cache_20260608.tar.gz
+```
+
+The import merges — transcripts already on the server are kept, new ones are added. No service restart needed; the scraper-service picks up the files immediately.
+
 ---
 
 ## Architecture at a glance
