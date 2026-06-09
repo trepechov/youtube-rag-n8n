@@ -53,7 +53,8 @@ services:
     restart: always
     environment:
       OPENAI_API_BASE_URL: http://chat-api:8000/v1
-      WEBUI_AUTH: "False"
+      WEBUI_AUTH: "True"
+      ENABLE_SIGNUP: "True"
       DEFAULT_MODELS: "rag:${QDRANT_COLLECTION:-podcasts}"
     volumes:
       - open_webui_data:/app/backend/data
